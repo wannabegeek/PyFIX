@@ -6,11 +6,8 @@
 # Tom Fewster 2013
 #
 
-import asyncore
 from datetime import datetime, timedelta
 import importlib
-import socket
-import errno
 from pyfix.codec import Codec
 
 from pyfix.session import *
@@ -37,89 +34,6 @@ class FIXException(Exception):
     def __init__(self, reason, description = None):
         super(Exception, self).__init__(description)
         self.reason = reason
-
-if os.name == 'posix':
-    class ShutdownDispatcher(asyncore.file_dispatcher):
-        def __init__(self, server):
-            (self.pipein, self.pipeout) = os.pipe()
-            asyncore.file_dispatcher.__init__(self, self.pipein)
-            self.server = server
-
-        def close(self):
-            os.close(self.pipein)
-            os.close(self.pipeout)
-
-        def writable(self):
-            return False
-
-        def handle_read(self, type, closure):
-            logging.info("Should I shutdown????")
-            try:
-                while True:
-                    self.recv(1)
-            except:
-                pass
-            self.server.signalShutdown()
-
-        def signalShutdown(self):
-            os.write(self.pipeout, "A".encode('utf-8'))
-else:
-    class ShutdownDispatcher(asyncore.dispatcher):
-        def __init__(self, server):
-            self.w = socket.socket()
-            self.w.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.server = server
-
-            count = 0
-            while True:
-                count += 1
-                # Bind to a local port; for efficiency, let the OS pick
-                # a free port for us.
-                # Unfortunately, stress tests showed that we may not
-                # be able to connect to that port ("Address already in
-                # use") despite that the OS picked it.
-                a = socket.socket()
-                a.bind(("127.0.0.1", 0))
-                connect_address = a.getsockname() # assigned (host, port) pair
-                a.listen(1)
-                try:
-                    self.w.connect(connect_address)
-                    break # success
-                except socket.error as detail:
-                    if detail[0] != errno.WSAEADDRINUSE:
-                        # "Address already in use" is the only error
-                        # I've seen on two WinXP Pro SP2 boxes, under
-                        # Pythons 2.3.5 and 2.4.1.
-                        raise
-                    # (10048, 'Address already in use')
-                    # assert count <= 2 # never triggered in Tim's tests
-                    if count >= 10: # I've never seen it go above 2
-                        a.close()
-                        self.w.close()
-                        raise RuntimeError("Cannot bind trigger!")
-                    # Close `a` and try again.  Note:  I originally put a short
-                    # sleep() here, but it didn't appear to help or hurt.
-                    a.close()
-
-            r, addr = a.accept() # r becomes asyncore's (self.)socket
-            a.close()
-
-            asyncore.dispatcher.__init__(self, r)
-
-        def writable(self):
-            return False
-
-        def handle_read(self, type, closure):
-            logging.info("Should I shutdown????")
-            try:
-                while True:
-                    self.recv(1)
-            except:
-                pass
-            self.server.signalShutdown()
-
-        def signalShutdown(self):
-            self.w.send("A".encode('utf-8'))
 
 connectedSessions = {}
 

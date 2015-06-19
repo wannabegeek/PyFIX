@@ -10,24 +10,30 @@ class Client:
         self.clOrdID = 1
 
         self.eventMgr = EventManager()
+        # create a FIX Client using the FIX 4.4 standard
         self.client = FIXClient(self.eventMgr, "pyfix.FIX44", "TARGET", "SENDER")
 
+        # we register some listeners since we want to know when the connection goes up or down
         self.client.addConnectionListener(self.onConnect, ConnectionState.CONNECTED)
         self.client.addConnectionListener(self.onDisconnect, ConnectionState.DISCONNECTED)
 
+        # start our event listener indefinitely
         self.client.start('localhost', int("9898"))
         while True:
             self.eventMgr.waitForEventWithTimeout(10.0)
 
+        # some clean up before we shut down
         self.client.removeConnectionListener(self.onConnect, ConnectionState.CONNECTED)
         self.client.removeConnectionListener(self.onConnect, ConnectionState.DISCONNECTED)
 
     def onConnect(self, session):
         logging.info("Established connection to %s" % (session.address(), ))
+        # register to receive message notifications on the session which has just been created
         session.addMessageHandler(self.onLogin, MessageDirection.INBOUND, self.client.protocol.msgtype.LOGON)
 
     def onDisconnect(self, session):
         logging.info("%s has disconnected" % (session.address(), ))
+        # we need to clean up our handlers, since this session is disconnected now
         session.removeMsgHandler(self.onLogin, MessageDirection.INBOUND, self.client.protocol.msgtype.LOGON)
         if self.msgGenerator:
             self.eventMgr.unregisterHandler(self.msgGenerator)
