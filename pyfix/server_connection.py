@@ -60,7 +60,6 @@ class FIXServer(FIXEndPoint):
      FIXEndPoint.__init__(self, eventMgr, protocol)
 
     def start(self, host, port):
-        self.shouldShutdown = False
         self.connections = []
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

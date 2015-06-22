@@ -160,24 +160,3 @@ class EventManager(object):
 
     def isRegistered(self, handler):
         return handler in self.handlers
-
-
-def reset(t):
-    print("resetting timer %s" % (t,))
-    t.reset()
-
-def main():
-    import sys
-
-    mgr = EventManager()
-    t1 = TimerEventRegistration(lambda fire, closure: print("Timer fired"), 5.0)
-    mgr.registerHandler(t1)
-    mgr.registerHandler(TimerEventRegistration(lambda fire, closure: reset(t1), 4.9))
-
-    print("Starting event loop " + str(datetime.datetime.utcnow().timestamp()))
-    for i in range(0, 10):
-        mgr.waitForEventWithTimeout(10.0)
-    print("Exited event loop " + str(datetime.datetime.utcnow().timestamp()))
-
-if __name__ == '__main__':
-    main()

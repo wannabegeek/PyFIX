@@ -90,7 +90,6 @@ class FIXClient(FIXEndPoint):
     def start(self, host, port):
         self.host = host
         self.port = port
-        self.shouldShutdown = False
         self.connections = []
         self.connectionRetryTimer = None
 

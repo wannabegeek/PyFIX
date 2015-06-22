@@ -157,8 +157,6 @@ class FIXEndPoint(object):
         self.connections = []
         self.connectionHandlers = []
         (self.pipein, self.pipeout) = os.pipe()
-        self.shutdown = ShutdownDispatcher(self)
-        self.shouldShutdown = False
 
     def writable(self):
         return True
