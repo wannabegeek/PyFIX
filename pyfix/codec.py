@@ -36,11 +36,14 @@ class Codec(object):
 
         body.append("%s=%s" % (self.protocol.fixtags.SenderCompID, session.senderCompId))
         body.append("%s=%s" % (self.protocol.fixtags.TargetCompID, session.targetCompId))
+
+        seqNo = 0
         if msgType == self.protocol.msgtype.SEQUENCERESET:
             msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
-            body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, msg[self.protocol.fixtags.MsgSeqNum]))
+            seqNo = msg[self.protocol.fixtags.MsgSeqNum]
         else:
-            body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, session.allocateSndSeqNo()))
+            seqNo = session.allocateSndSeqNo()
+        body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, seqNo))
         body.append("%s=%s" % (self.protocol.fixtags.SendingTime, self.current_datetime()))
 
         for t in msg.tags:

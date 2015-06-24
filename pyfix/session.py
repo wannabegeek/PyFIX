@@ -1,8 +1,3 @@
-#
-# Simple FIX Server
-#
-# Tom Fewster 2013
-#
 import logging
 
 import os
@@ -10,9 +5,11 @@ import mmap
 
 class FIXSession:
 
-    def __init__(self, senderCompId, targetCompId):
+    def __init__(self, sessionKey, senderCompId, targetCompId):
+        self.key = sessionKey
         self.senderCompId = senderCompId
         self.targetCompId = targetCompId
+
         filename = self.senderCompId + "_" + self.targetCompId + ".seq"
         exists = os.path.exists(filename)
         f = open(filename, "a+")

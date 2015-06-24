@@ -1,14 +1,7 @@
-#! /usr/bin/env python
-
-#
-# Simple FIX Server
-#
-# Tom Fewster 2013
-#
-
 from datetime import datetime, timedelta
 import importlib
 from pyfix.codec import Codec
+from pyfix.message import FIXMessage
 
 from pyfix.session import *
 from enum import Enum
@@ -35,12 +28,10 @@ class FIXException(Exception):
         super(Exception, self).__init__(description)
         self.reason = reason
 
-connectedSessions = {}
-
 class FIXConnectionHandler(object):
-    def __init__(self, eventMgr, protocol, sock=None, addr=None, observer=None):
+    def __init__(self, engine, protocol, sock=None, addr=None, observer=None):
         self.codec = Codec(protocol)
-        self.eventMgr = eventMgr
+        self.engine = engine
         self.connectionState = ConnectionState.CONNECTED
         self.session = None
         self.addr = addr
@@ -52,7 +43,18 @@ class FIXConnectionHandler(object):
         self.heartbeatTimerRegistration = None
         self.expectedHeartbeatRegistration = None
         self.socketEvent = FileDescriptorEventRegistration(self.handle_read, sock, EventType.READ)
-        self.eventMgr.registerHandler(self.socketEvent)
+        self.engine.eventManager.registerHandler(self.socketEvent)
+
+    def sessionKey(self, context):
+        if type(context) is FIXMessage:
+            return "%s_%s" % (context[self.codec.protocol.fixtags.SenderCompID], context[self.codec.protocol.fixtags.TargetCompID])
+        elif type(context) is FIXSession:
+            return "%s_%s" % (context.senderCompID, context.targetCompID)
+        else:
+            raise RuntimeError("Can't generate session key from object")
+
+    def sessionKeyFromCompIds(self, targetCompId, senderCompId):
+        return "%s_%s" % (senderCompId, targetCompId)
 
     def address(self):
         return self.addr
@@ -60,44 +62,41 @@ class FIXConnectionHandler(object):
     def disconnect(self):
         self.handle_close()
 
+    def _notifyMessageObservers(self, msg, direction):
+        for handler in filter(lambda x: (x[1] is None or x[1] == direction) and (x[2] is None or x[2] == msg.msgType), self.msgHandlers):
+            handler[0](self, msg)
+
     def addMessageHandler(self, handler, direction = None, msgType = None):
         self.msgHandlers.append((handler, direction, msgType))
 
-    def removeMsgHandler(self, handler, direction = None, msgType = None):
+    def removeMessageHandler(self, handler, direction = None, msgType = None):
         remove = filter(lambda x: x[0] == handler and
                                   (x[1] == direction or direction is None) and
                                   (x[2] == msgType or msgType is None), self.msgHandlers)
         for h in remove:
             self.msgHandlers.remove(h)
 
-    def calculateHeartbeatTimeout(self):
-        if self.connectionState != ConnectionState.LOGGED_IN:
-            return None
-        return (self.heartbeatNextSchedule - datetime.datetime.utcnow()).total_seconds()
-
     def sendHeartbeat(self):
-        msg = self.codec.pack(self.codec.protocol.messages.Messages.heartbeat(), self.session)
-        self.sendMsg(msg)
+        self.sendMsg(self.codec.protocol.messages.Messages.heartbeat())
 
     def expectedHeartbeat(self, type, closure):
         logging.warning("Expected heartbeat from peer %s" % (self.expectedHeartbeatRegistration ,))
-        msg = self.codec.pack(self.codec.protocol.messages.Messages.test_request(), self.session)
-        self.sendMsg(msg)
+        self.sendMsg(self.codec.protocol.messages.Messages.test_request())
 
     def registerLoggedIn(self):
         self.heartbeatTimerRegistration = TimerEventRegistration(lambda type, closure: self.sendHeartbeat(), self.heartbeatPeriod)
-        self.eventMgr.registerHandler(self.heartbeatTimerRegistration)
+        self.engine.eventManager.registerHandler(self.heartbeatTimerRegistration)
         # register timeout for 10% more than we expect
         self.expectedHeartbeatRegistration = TimerEventRegistration(self.expectedHeartbeat, self.heartbeatPeriod * 1.10)
-        self.eventMgr.registerHandler(self.expectedHeartbeatRegistration)
+        self.engine.eventManager.registerHandler(self.expectedHeartbeatRegistration)
 
 
     def registerLoggedOut(self):
         if self.heartbeatTimerRegistration is not None:
-            self.eventMgr.unregisterHandler(self.heartbeatTimerRegistration)
+            self.engine.eventManager.unregisterHandler(self.heartbeatTimerRegistration)
             self.heartbeatTimerRegistration = None
         if self.expectedHeartbeatRegistration is not None:
-            self.eventMgr.unregisterHandler(self.expectedHeartbeatRegistration)
+            self.engine.eventManager.unregisterHandler(self.expectedHeartbeatRegistration)
             self.expectedHeartbeatRegistration = None
 
     def handle_read(self, type, closure):
@@ -130,7 +129,7 @@ class FIXConnectionHandler(object):
             self.msgHandlers.clear()
             if self.observer is not None:
                 self.observer.notifyDisconnect(self)
-            self.eventMgr.unregisterHandler(self.socketEvent)
+            self.engine.eventManager.unregisterHandler(self.socketEvent)
 
 
     def sendMsg(self, msg):
@@ -139,24 +138,25 @@ class FIXConnectionHandler(object):
         if self.connectionState != ConnectionState.CONNECTED and self.connectionState != ConnectionState.LOGGED_IN:
             raise FIXException(FIXException.FIXExceptionReason.NOT_CONNECTED)
 
-        encodedMsg = msg.encode('utf-8')
+        encodedMsg = self.codec.pack(msg, self.session).encode('utf-8')
         self.sock.send(encodedMsg)
-        self.heartbeatNextSchedule = datetime.utcnow() + timedelta(seconds=self.heartbeatPeriod)
-        (decodedMsg, empty) = self.codec.parse(encodedMsg)
+        if self.heartbeatTimerRegistration is not None:
+            self.heartbeatTimerRegistration.reset()
 
-        for handler in filter(lambda x: (x[1] is None or x[1] == MessageDirection.OUTBOUND) and
-                (x[2] is None or x[2] == decodedMsg[protocol.fixtags.MsgType]), self.msgHandlers):
-                handler[0](self, decodedMsg)
+        decodedMsg, junk = self.codec.parse(encodedMsg)
+#         TODO: add journalling
+#        self.engine.journaller.persistMsg(decodedMsg, self.session, MessageDirection.OUTBOUND)
+
+        self._notifyMessageObservers(decodedMsg, MessageDirection.OUTBOUND)
 
 
 class FIXEndPoint(object):
-    def __init__(self, eventMgr, protocol):
-        self.eventMgr = eventMgr
+    def __init__(self, engine, protocol):
+        self.engine = engine
         self.protocol = importlib.import_module(protocol)
 
         self.connections = []
         self.connectionHandlers = []
-        (self.pipein, self.pipeout) = os.pipe()
 
     def writable(self):
         return True
@@ -180,16 +180,3 @@ class FIXEndPoint(object):
         for handler in filter(lambda x: x[1] == ConnectionState.DISCONNECTED, self.connectionHandlers):
                 handler[0](connection)
 
-    def heartbeatScheduleTimeout(self):
-        timeouts = []
-        for connection in self.connections:
-            timeout = connection.calculateHeartbeatTimeout()
-            if timeout is not None:
-                if timeout < 0:
-                    if connection.connectionState == ConnectionState.LOGGED_IN:
-                        connection.sendHeartbeat()
-                    timeout = connection.calculateHeartbeatTimeout()
-                timeouts.append(timeout)
-        if timeouts == []:
-            return None
-        return min(timeouts)

@@ -1,15 +1,16 @@
 import logging
 from pyfix.connection import ConnectionState, MessageDirection
+from pyfix.engine import FIXEngine
 from pyfix.message import FIXMessage
 from pyfix.server_connection import FIXServer
 from pyfix.event import EventManager
 
 
-class Replay:
+class Server(FIXEngine):
     def __init__(self):
-        eventMgr = EventManager()
+        FIXEngine.__init__(self)
         # create a FIX Server using the FIX 4.4 standard
-        self.server = FIXServer(eventMgr, "pyfix.FIX44")
+        self.server = FIXServer(self, "pyfix.FIX44")
 
         # we register some listeners since we want to know when the connection goes up or down
         self.server.addConnectionListener(self.onConnect, ConnectionState.CONNECTED)
@@ -18,11 +19,15 @@ class Replay:
         # start our event listener indefinitely
         self.server.start('', int("9898"))
         while True:
-            eventMgr.waitForEventWithTimeout(10.0)
+            self.eventManager.waitForEventWithTimeout(10.0)
 
         # some clean up before we shut down
         self.server.removeConnectionListener(self.onConnect, ConnectionState.CONNECTED)
         self.server.removeConnectionListener(self.onConnect, ConnectionState.DISCONNECTED)
+
+    def validateSession(self, session):
+        logging.info("Received login request for %s / %s" % (session.targetCompId, session.senderCompId))
+        return True
 
     def onConnect(self, session):
         logging.info("Accepted new connection from %s" % (session.address(), ))
@@ -33,8 +38,8 @@ class Replay:
     def onDisconnect(self, session):
         logging.info("%s has disconnected" % (session.address(), ))
         # we need to clean up our handlers, since this session is disconnected now
-        session.removeMsgHandler(self.onLogin, MessageDirection.OUTBOUND, self.server.protocol.msgtype.LOGON)
-        session.removeMsgHandler(self.onNewOrder, MessageDirection.INBOUND, self.server.protocol.msgtype.NEWORDERSINGLE)
+        session.removeMessageHandler(self.onLogin, MessageDirection.OUTBOUND, self.server.protocol.msgtype.LOGON)
+        session.removeMessageHandler(self.onNewOrder, MessageDirection.INBOUND, self.server.protocol.msgtype.NEWORDERSINGLE)
 
     def onLogin(self, connectionHandler, msg):
         codec = connectionHandler.codec
@@ -59,12 +64,12 @@ class Replay:
         msg.setField(codec.protocol.fixtags.ClOrdID, request.getField(codec.protocol.fixtags.ClOrdID))
         msg.setField(codec.protocol.fixtags.Currency, "GBP")
 
-        connectionHandler.sendMsg(codec.pack(msg, connectionHandler.session))
+        connectionHandler.sendMsg(msg)
 
 
 def main():
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
-    replay = Replay()
+    server = Server()
     logging.info("All done... shutting down")
 
 if __name__ == '__main__':
