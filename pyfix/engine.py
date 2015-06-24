@@ -1,8 +1,5 @@
-import logging
 from pyfix.event import EventManager
 from pyfix.journaler import Journaler
-from pyfix.session import FIXSession
-
 
 class FIXEngine(object):
     def __init__(self, journalfile = None):
@@ -10,17 +7,21 @@ class FIXEngine(object):
         self.journaller = Journaler(journalfile)
         self.sessions = {}
 
-        # TODO: we should load all sessions from the journal and add to our list
+        # We load all sessions from the journal and add to our list
+        for session in self.journaller.sessions():
+            self.sessions[session.key] = session
 
     def validateSession(self, targetCompId, senderCompId):
         # this make any session we receive valid
         return True
 
-    def addSession(self, session):
-        if session.key not in self.sessions:
+    def createSession(self, targetCompId, senderCompId):
+        if self.findSessionByCompIds(targetCompId, senderCompId) is None:
+            session = self.journaller.createSession(targetCompId, senderCompId)
             self.sessions[session.key] = session
         else:
             raise RuntimeError("Failed to add session with duplicate key")
+        return session
 
     def getSession(self, identifier):
         try:
@@ -29,17 +30,15 @@ class FIXEngine(object):
             return None
 
     def findSessionByCompIds(self, targetCompId, senderCompId):
-        sessionKey = FIXSession.generateKeysFromCompIds(targetCompId, senderCompId)
-        try:
-            return self.sessions[sessionKey]
-        except KeyError:
-            return None
+        sessions = [x for x in self.sessions.values() if x.targetCompId == targetCompId and x.senderCompId == senderCompId]
+        if sessions is not None and len(sessions) != 0:
+            return sessions[0]
+        return None
 
     def getOrCreateSessionFromCompIds(self, targetCompId, senderCompId):
         session = self.findSessionByCompIds(targetCompId, senderCompId)
         if session is None:
             if self.validateSession(targetCompId, senderCompId):
-                session = FIXSession(targetCompId, senderCompId)
-                self.addSession(session)
+                session = self.createSession(targetCompId, senderCompId)
 
         return session

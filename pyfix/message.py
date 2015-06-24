@@ -1,4 +1,9 @@
 from collections import OrderedDict
+from enum import Enum
+
+class MessageDirection(Enum):
+    INBOUND = 0
+    OUTBOUND = 1
 
 class _FIXRepeatingGroupContainer:
     def __init__(self):

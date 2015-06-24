@@ -1,8 +1,7 @@
-from datetime import datetime, timedelta
 import importlib
 from pyfix.codec import Codec
 from pyfix.journaler import DuplicateSeqNoError
-from pyfix.message import FIXMessage
+from pyfix.message import FIXMessage, MessageDirection
 
 from pyfix.session import *
 from enum import Enum
@@ -14,10 +13,6 @@ class ConnectionState(Enum):
     CONNECTED = 2
     LOGGED_IN = 3
     LOGGED_OUT = 4
-
-class MessageDirection(Enum):
-    INBOUND = 0
-    OUTBOUND = 1
 
 class FIXException(Exception):
     class FIXExceptionReason(Enum):

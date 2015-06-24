@@ -1,7 +1,8 @@
-import logging
 import sqlite3
 import pickle
-from pyfix.connection import MessageDirection
+from pyfix.message import MessageDirection
+from pyfix.session import FIXSession
+
 
 class DuplicateSeqNoError(Exception):
     pass
@@ -22,20 +23,46 @@ class Journaler(object):
                                "PRIMARY KEY (seqNo, session, direction)) WITHOUT ROWID")
 
         self.cursor.execute("CREATE TABLE IF NOT EXISTS session("
+                               "sessionId INTEGER PRIMARY KEY AUTOINCREMENT,"
                                "targetCompId TEXT NOT NULL,"
                                "senderCompId TEXT NOT NULL,"
                                "outboundSeqNo INTEGER DEFAULT 0,"
                                "inboundSeqNo INTEGER DEFAULT 0,"
-                               "PRIMARY KEY (targetCompId, senderCompId))")
+                               "UNIQUE (targetCompId, senderCompId))")
+
+    def sessions(self):
+        sessions = []
+        self.cursor.execute("SELECT sessionId, targetCompId, senderCompId, outboundSeqNo, inboundSeqNo FROM session")
+        for sessionInfo in self.cursor:
+            session = FIXSession(sessionInfo[0], sessionInfo[1], sessionInfo[2])
+            session.sndSeqNum = sessionInfo[3]
+            session.rcvSeqNum = sessionInfo[4]
+            sessions.append(session)
+
+        return sessions
 
     def createSession(self, targetCompId, senderCompId):
-        pass
+        session = None
+        try:
+            self.cursor.execute("INSERT INTO session(targetCompId, senderCompId) VALUES(?, ?)", (targetCompId, senderCompId))
+            sessionId = self.cursor.lastrowid
+            self.conn.commit()
+            session = FIXSession(sessionId, targetCompId, senderCompId)
+        except sqlite3.IntegrityError:
+            raise RuntimeError("Session already exists for TargetCompId: %s SenderCompId: %s" % (targetCompId, senderCompId))
+
+        return session
 
     def persistMsg(self, msg, session, direction):
         msgStr = pickle.dumps(msg)
         seqNo = session.sndSeqNum if direction == MessageDirection.OUTBOUND else session.rcvSeqNum
         try:
             self.cursor.execute("INSERT INTO message VALUES(?, ?, ?, ?)", (seqNo, session.key, direction.value, msgStr))
+            if direction == MessageDirection.OUTBOUND:
+                self.cursor.execute("UPDATE session SET outboundSeqNo=?", (seqNo,))
+            elif direction == MessageDirection.INBOUND:
+                self.cursor.execute("UPDATE session SET inboundSeqNo=?", (seqNo,))
+
             self.conn.commit()
         except sqlite3.IntegrityError:
             raise DuplicateSeqNoError("%s is a duplicate" % (seqNo, ))
@@ -52,4 +79,25 @@ class Journaler(object):
         msgs = []
         for msg in self.cursor:
             msgs.append(pickle.loads(msg[0]))
+        return msgs
+
+    def getAllMsgs(self, sessions = [], direction = None):
+        sql = "SELECT msg, direction, session FROM message"
+        clauses = []
+        args = []
+        if sessions is not None and len(sessions) != 0:
+            clauses.append("session in (" + ','.join('?'*len(sessions)) + ")")
+            args.extend(sessions)
+        if direction is not None:
+            clauses.append("direction = ?")
+            args.append(direction.value)
+
+        if clauses:
+            sql = sql + " WHERE " + " AND ".join(clauses)
+
+        self.cursor.execute(sql, tuple(args))
+        msgs = []
+        for msg in self.cursor:
+            msgs.append((pickle.loads(msg[0]), msg[1], msg[2]))
+
         return msgs

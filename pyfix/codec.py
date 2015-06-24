@@ -122,15 +122,12 @@ class Codec(object):
 
                     if tag == self.protocol.fixtags.CheckSum:
                         cksum = ((sum([ord(i) for i in list(self.SOH.join(msg[:-1]))]) + 1) % 256)
-                        if cksum == int(value):
-                            logging.debug("\tCheckSum: %s (OK)" % (int(value)))
-                        else:
+                        if cksum != int(value):
                             logging.warning("\tCheckSum: %s (INVALID) expecting %s" % (int(value), cksum))
                     elif tag == self.protocol.fixtags.MsgType:
                         try:
                             msgType =  self.protocol.msgtype.msgTypeToName(value)
                             decodedMsg.setMsgType(value)
-                            logging.debug("MsgType: %s" % msgType)
                         except KeyError:
                             logging.error('*** MsgType "%s" not supported ***')
 
@@ -164,7 +161,6 @@ class Codec(object):
                         # this isn't a repeating group field, so just add it normally
                         decodedMsg.setField(tag, value)
 
-                logging.debug("\t%s" % decodedMsg)
                 return (decodedMsg, remainingMsgFragment)
         except UnicodeDecodeError as why:
             logging.error("Failed to parse message %s" % (why, ))

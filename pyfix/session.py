@@ -4,17 +4,13 @@ import os
 import mmap
 
 class FIXSession:
-    def __init__(self, targetCompId, senderCompId):
-        self.key = FIXSession.generateKeysFromCompIds(targetCompId, senderCompId)
+    def __init__(self, key, targetCompId, senderCompId):
+        self.key = key
         self.senderCompId = senderCompId
         self.targetCompId = targetCompId
 
         self.sndSeqNum = 1
         self.rcvSeqNum = 1
-
-    @classmethod
-    def generateKeysFromCompIds(cls, targetCompId, senderCompId):
-        return "%s_%s" % (senderCompId, targetCompId)
 
     def validateCompIds(self, targetCompId, senderCompId):
         return self.senderCompId == senderCompId and self.targetCompId == targetCompId
