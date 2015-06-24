@@ -24,6 +24,12 @@ class FIXException(Exception):
         super(Exception, self).__init__(description)
         self.reason = reason
 
+class SessionWarning(Exception):
+    pass
+
+class SessionError(Exception):
+    pass
+
 class FIXConnectionHandler(object):
     def __init__(self, engine, protocol, sock=None, addr=None, observer=None):
         self.codec = Codec(protocol)
@@ -117,8 +123,56 @@ class FIXConnectionHandler(object):
                 logging.debug("Connection has been closed %s" % (why, ))
                 self.disconnect()
 
-    def processMessage(self, msg):
-        pass
+    def handleSessionMessage(self, msg):
+        return -1
+
+    def processMessage(self, decodedMsg):
+        protocol = self.codec.protocol
+
+        beginString = decodedMsg[protocol.fixtags.BeginString]
+        if beginString != protocol.beginstring:
+            logging.warning("FIX BeginString is incorrect (expected: %s received: %s)", (protocol.beginstring, beginString))
+            self.disconnect()
+            return
+
+        msgType = decodedMsg[protocol.fixtags.MsgType]
+
+        try:
+            responses = []
+            if msgType in protocol.msgtype.sessionMessageTypes:
+                (recvSeqNo, responses) = self.handleSessionMessage(decodedMsg)
+            else:
+                recvSeqNo = decodedMsg[protocol.fixtags.MsgSeqNum]
+
+            self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+
+            for m in responses:
+                self.sendMsg(m)
+
+            # validate the seq number
+            (seqNoState, lastKnownSeqNo) = self.session.validateRecvSeqNo(recvSeqNo)
+
+            if seqNoState is False:
+                # We should send a resend request
+                self.sendMsg(protocol.messages.Messages.resend_request(lastKnownSeqNo, recvSeqNo))
+            else:
+                self.session.setRecvSeqNo(recvSeqNo)
+
+        except SessionWarning as sw:
+            logging.warning(sw)
+        except SessionError as se:
+            logging.error(se)
+            self.disconnect()
+        except DuplicateSeqNoError:
+            try:
+                if decodedMsg[protocol.fixtags.PossDupFlag] == "Y":
+                    logging.debug("Received duplicate message with PossDupFlag set")
+            except KeyError:
+                pass
+            finally:
+                logging.error("Failed to process message with duplicate seq no - disconnecting")
+                self.disconnect()
+
 
     def handle_close(self):
         if self.connectionState != ConnectionState.DISCONNECTED:

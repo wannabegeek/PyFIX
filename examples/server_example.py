@@ -47,6 +47,7 @@ class Server(FIXEngine):
         logging.info("[" + msg[codec.protocol.fixtags.SenderCompID] + "] <---- " + codec.protocol.msgtype.msgTypeToName(msg[codec.protocol.fixtags.MsgType]))
 
     def onNewOrder(self, connectionHandler, request):
+        logging.debug("Received msg: %s" % (request,))
         # respond with an ExecutionReport Ack
         codec = connectionHandler.codec
         msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)

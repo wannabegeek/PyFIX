@@ -64,7 +64,7 @@ class Journaler(object):
                 self.cursor.execute("UPDATE session SET inboundSeqNo=?", (seqNo,))
 
             self.conn.commit()
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
             raise DuplicateSeqNoError("%s is a duplicate" % (seqNo, ))
 
     def recoverMsg(self, session, direction, seqNo):

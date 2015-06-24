@@ -92,6 +92,8 @@ SECURITYLIST = "y"
 QUOTECANCEL = "Z"
 DERIVATIVESECURITYLISTREQUEST = "z"
 
+sessionMessageTypes = [HEARTBEAT, TESTREQUEST, RESENDREQUEST, REJECT, SEQUENCERESET, LOGOUT, LOGON, XMLNONFIX]
+
 tags = {}
 for x in dir():
     tags[str(globals()[x])] = x
