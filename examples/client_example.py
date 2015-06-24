@@ -8,7 +8,7 @@ from pyfix.event import EventManager, TimerEventRegistration
 
 class Client(FIXEngine):
     def __init__(self):
-        FIXEngine.__init__(self)
+        FIXEngine.__init__(self, "client_example.store")
         self.clOrdID = 1
         self.msgGenerator = None
 

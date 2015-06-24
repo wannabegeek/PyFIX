@@ -1,5 +1,6 @@
 import logging
 import socket
+from pyfix.journaler import DuplicateSeqNoError
 from pyfix.session import FIXSession
 from pyfix.connection import FIXEndPoint, ConnectionState, MessageDirection, FIXConnectionHandler
 from pyfix.event import TimerEventRegistration
@@ -15,7 +16,10 @@ class FIXClientConnectionHandler(FIXConnectionHandler):
         self.heartbeatPeriod = float(heartbeatTimeout)
 
         # we need to send a login request.
-        self.session = FIXSession(self.sessionKeyFromCompIds(self.targetCompId, self.senderCompId), self.senderCompId, self.targetCompId)
+        self.session = self.engine.getOrCreateSessionFromCompIds(self.targetCompId, self.senderCompId)
+        if self.session is None:
+            raise RuntimeError("Failed to create client session")
+
         self.sendMsg(protocol.messages.Messages.logon())
 
     def processMessage(self, decodedMsg):
@@ -25,7 +29,10 @@ class FIXClientConnectionHandler(FIXConnectionHandler):
         recvSeqNo = decodedMsg[protocol.fixtags.MsgSeqNum]
         (seqNoState, lastKnownSeqNo) = self.session.validateRecvSeqNo(recvSeqNo)
 
-        self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+        try:
+            self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+        except DuplicateSeqNoError:
+            pass
 
         if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGON:
             self.connectionState = ConnectionState.LOGGED_IN
@@ -67,6 +74,7 @@ class FIXClient(FIXEndPoint):
             self.socket.connect((self.host, self.port))
             if self.connectionRetryTimer is not None:
                 self.engine.eventManager.unregisterHandler(self.connectionRetryTimer)
+                self.connectionRetryTimer = None
             self.connected()
         except socket.error as why:
             logging.error("Connection failed, trying again in 5s")

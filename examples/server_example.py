@@ -8,7 +8,7 @@ from pyfix.event import EventManager
 
 class Server(FIXEngine):
     def __init__(self):
-        FIXEngine.__init__(self)
+        FIXEngine.__init__(self, "server_example.store")
         # create a FIX Server using the FIX 4.4 standard
         self.server = FIXServer(self, "pyfix.FIX44")
 
@@ -25,8 +25,8 @@ class Server(FIXEngine):
         self.server.removeConnectionListener(self.onConnect, ConnectionState.CONNECTED)
         self.server.removeConnectionListener(self.onConnect, ConnectionState.DISCONNECTED)
 
-    def validateSession(self, session):
-        logging.info("Received login request for %s / %s" % (session.targetCompId, session.senderCompId))
+    def validateSession(self, targetCompId, senderCompId):
+        logging.info("Received login request for %s / %s" % (senderCompId, targetCompId))
         return True
 
     def onConnect(self, session):

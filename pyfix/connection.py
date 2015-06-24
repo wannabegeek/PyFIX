@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import importlib
 from pyfix.codec import Codec
+from pyfix.journaler import DuplicateSeqNoError
 from pyfix.message import FIXMessage
 
 from pyfix.session import *
@@ -63,6 +64,7 @@ class FIXConnectionHandler(object):
         self.handle_close()
 
     def _notifyMessageObservers(self, msg, direction):
+        self.engine.journaller.persistMsg(msg, self.session, direction)
         for handler in filter(lambda x: (x[1] is None or x[1] == direction) and (x[2] is None or x[2] == msg.msgType), self.msgHandlers):
             handler[0](self, msg)
 
@@ -101,21 +103,24 @@ class FIXConnectionHandler(object):
 
     def handle_read(self, type, closure):
         protocol = self.codec.protocol
-        msg = self.sock.recv(8192)
-        if msg:
-            self.msgBuffer = self.msgBuffer + msg
-            (decodedMsg, parsedLength) = self.codec.parse(self.msgBuffer)
-            self.msgBuffer = self.msgBuffer[parsedLength:]
-            while decodedMsg is not None and self.connectionState != ConnectionState.DISCONNECTED:
-                self.processMessage(decodedMsg)
+        try:
+            msg = self.sock.recv(8192)
+            if msg:
+                self.msgBuffer = self.msgBuffer + msg
                 (decodedMsg, parsedLength) = self.codec.parse(self.msgBuffer)
                 self.msgBuffer = self.msgBuffer[parsedLength:]
-            if self.expectedHeartbeatRegistration is not None:
-                self.expectedHeartbeatRegistration.reset()
-        else:
-            logging.debug("Connection has been closed")
-            self.disconnect()
-
+                while decodedMsg is not None and self.connectionState != ConnectionState.DISCONNECTED:
+                    self.processMessage(decodedMsg)
+                    (decodedMsg, parsedLength) = self.codec.parse(self.msgBuffer)
+                    self.msgBuffer = self.msgBuffer[parsedLength:]
+                if self.expectedHeartbeatRegistration is not None:
+                    self.expectedHeartbeatRegistration.reset()
+            else:
+                logging.debug("Connection has been closed")
+                self.disconnect()
+        except ConnectionError as why:
+                logging.debug("Connection has been closed %s" % (why, ))
+                self.disconnect()
 
     def processMessage(self, msg):
         pass
@@ -133,8 +138,6 @@ class FIXConnectionHandler(object):
 
 
     def sendMsg(self, msg):
-        protocol = self.codec.protocol
-
         if self.connectionState != ConnectionState.CONNECTED and self.connectionState != ConnectionState.LOGGED_IN:
             raise FIXException(FIXException.FIXExceptionReason.NOT_CONNECTED)
 
@@ -144,10 +147,11 @@ class FIXConnectionHandler(object):
             self.heartbeatTimerRegistration.reset()
 
         decodedMsg, junk = self.codec.parse(encodedMsg)
-#         TODO: add journalling
-#        self.engine.journaller.persistMsg(decodedMsg, self.session, MessageDirection.OUTBOUND)
 
-        self._notifyMessageObservers(decodedMsg, MessageDirection.OUTBOUND)
+        try:
+            self._notifyMessageObservers(decodedMsg, MessageDirection.OUTBOUND)
+        except DuplicateSeqNoError:
+            logging.error("We have sent a message with a duplicate seq no, failed to persist it")
 
 
 class FIXEndPoint(object):

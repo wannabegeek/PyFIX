@@ -1,5 +1,6 @@
 import logging
 import socket
+from pyfix.journaler import DuplicateSeqNoError
 from pyfix.session import FIXSession
 from pyfix.connection import FIXEndPoint, ConnectionState, MessageDirection, FIXConnectionHandler
 from pyfix.event import FileDescriptorEventRegistration, EventType
@@ -13,45 +14,77 @@ class FIXServerConnectionHandler(FIXConnectionHandler):
         protocol = self.codec.protocol
 
         recvSeqNo = decodedMsg[protocol.fixtags.MsgSeqNum]
+        beginString = decodedMsg[protocol.fixtags.BeginString]
+        if beginString != protocol.beginstring:
+            logging.warning("FIX BeginString is incorrect (expected: %s received: %s)", (protocol.beginstring, beginString))
+            self.disconnect()
+            return
+
+        targetCompId = decodedMsg[protocol.fixtags.TargetCompID]
+        senderCompId = decodedMsg[protocol.fixtags.SenderCompID]
 
         if self.connectionState != ConnectionState.LOGGED_IN:
             if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGON:
                 if self.connectionState == ConnectionState.LOGGED_IN:
                     logging.warning("Client session already logged in - ignoring login request")
-                else :
-                    session = FIXSession(self.sessionKey(decodedMsg), decodedMsg[protocol.fixtags.TargetCompID], decodedMsg[protocol.fixtags.SenderCompID])
-                    if self.engine.validateSession(session):
-                        self.session = session
-                        self.connectionState = ConnectionState.LOGGED_IN
-                        self.heartbeatPeriod = float(decodedMsg[protocol.fixtags.HeartBtInt])
-                        self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+                else:
+                    # compids are reversed here...
+                    self.session = self.engine.getOrCreateSessionFromCompIds(senderCompId, targetCompId)
+                    if self.session is not None:
+                        try:
+                            self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+                            self.connectionState = ConnectionState.LOGGED_IN
+                            self.heartbeatPeriod = float(decodedMsg[protocol.fixtags.HeartBtInt])
+                            self.sendMsg(protocol.messages.Messages.logon())
+                            self.registerLoggedIn()
+                        except DuplicateSeqNoError:
+                            logging.error("Failed to process login request with duplicate seq no")
+                            self.disconnect()
+                            return
 
-                        self.sendMsg(protocol.messages.Messages.logon())
-                        self.registerLoggedIn()
                     else:
+                        logging.warning("Rejected login attempt for invalid session (SenderCompId: %s, TargetCompId: %s)" % (senderCompId, targetCompId))
                         self.disconnect()
                         return # we have to return here since self.session won't be valid
             else:
                 logging.warning("Can't process message, counterparty is not logged in")
                 return # we have to return here since self.session won't be valid
         else:
-            # we must be logged in to handle these messages
+            # we must be logged in to get here
+            # compids are reversed here
+            if not self.session.validateCompIds(senderCompId, targetCompId):
+                logging.error("Received message with unexpected comp ids")
+                self.disconnect()
+                return
+
             if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGON:
                 logging.warning("Client session already logged in - ignoring login request")
             else:
-                self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
+                try:
+                    self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
 
-                if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGOUT:
-                    self.connectionState = ConnectionState.LOGGED_OUT
-                    self.registerLoggedOut()
-                    self.handle_close()
-                elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.TESTREQUEST:
-                    self.sendMsg(protocol.messages.Messages.heartbeat())
-                elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.RESENDREQUEST:
-                    self.sendMsg(protocol.messages.Messages.sequence_reset(decodedMsg, True))
-                elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.SEQUENCERESET:
-                    newSeqNo = decodedMsg[protocol.fixtags.NewSeqNo]
-                    recvSeqNo = newSeqNo
+                    if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGOUT:
+                        self.connectionState = ConnectionState.LOGGED_OUT
+                        self.registerLoggedOut()
+                        self.handle_close()
+                    elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.TESTREQUEST:
+                        self.sendMsg(protocol.messages.Messages.heartbeat())
+                    elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.RESENDREQUEST:
+                        self.sendMsg(protocol.messages.Messages.sequence_reset(decodedMsg, True))
+                    elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.SEQUENCERESET:
+                        newSeqNo = decodedMsg[protocol.fixtags.NewSeqNo]
+                        recvSeqNo = newSeqNo
+                except DuplicateSeqNoError:
+                    try:
+                        if decodedMsg[protocol.fixtags.PossDupFlag] == "Y":
+                            logging.debug("Received duplicate message with PossDupFlag set")
+                            return
+                    except KeyError:
+                        pass
+                    finally:
+                        logging.error("Failed to process message with duplicate seq no - disconnecting")
+                        self.disconnect()
+                        return
 
         # validate the seq number
         (seqNoState, lastKnownSeqNo) = self.session.validateRecvSeqNo(recvSeqNo)

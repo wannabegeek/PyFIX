@@ -4,37 +4,24 @@ import os
 import mmap
 
 class FIXSession:
-
-    def __init__(self, sessionKey, senderCompId, targetCompId):
-        self.key = sessionKey
+    def __init__(self, targetCompId, senderCompId):
+        self.key = FIXSession.generateKeysFromCompIds(targetCompId, senderCompId)
         self.senderCompId = senderCompId
         self.targetCompId = targetCompId
 
-        filename = self.senderCompId + "_" + self.targetCompId + ".seq"
-        exists = os.path.exists(filename)
-        f = open(filename, "a+")
-        if not exists:
-            f.write('000001:000001')
-            f.flush()
-        f.seek(0)
-        self.mm = mmap.mmap(f.fileno(), 13)
-        seqNos = self.mm.read(13).decode('utf-8')
-        if seqNos:
-            (sndSeqNum, rcvSeqNum) = seqNos.split(':')
-            self.sndSeqNum = int(sndSeqNum)
-            self.rcvSeqNum = int(rcvSeqNum)
-            #print 'Snd:%d Rcv:%d' % (self.sndSeqNum, self.rcvSeqNum)
+        self.sndSeqNum = 1
+        self.rcvSeqNum = 1
 
-    def __del__(self):
-        self.mm.flush()
-        self.mm.close()
+    @classmethod
+    def generateKeysFromCompIds(cls, targetCompId, senderCompId):
+        return "%s_%s" % (senderCompId, targetCompId)
+
+    def validateCompIds(self, targetCompId, senderCompId):
+        return self.senderCompId == senderCompId and self.targetCompId == targetCompId
 
     def allocateSndSeqNo(self):
         result = self.sndSeqNum
         self.sndSeqNum += 1
-        self.mm.seek(0)
-        newSeqNoValues = '%06d:%06d' % (self.sndSeqNum, self.rcvSeqNum)
-        self.mm.write(newSeqNoValues.encode('utf-8'))
         return str(result)
 
     def validateRecvSeqNo(self, seqNo):
@@ -48,7 +35,4 @@ class FIXSession:
         if self.rcvSeqNum != int(seqNo):
             logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.rcvSeqNum) + ")")
         self.rcvSeqNum = int(seqNo) + 1
-        self.mm.seek(0)
-        newSeqNoValues = '%06d:%06d' % (self.sndSeqNum, self.rcvSeqNum)
-        self.mm.write(newSeqNoValues.encode('utf-8'))
 
