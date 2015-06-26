@@ -1,3 +1,4 @@
+from enum import Enum
 import logging
 import random
 from pyfix.connection import ConnectionState, MessageDirection
@@ -5,6 +6,10 @@ from pyfix.client_connection import FIXClient
 from pyfix.engine import FIXEngine
 from pyfix.message import FIXMessage
 from pyfix.event import TimerEventRegistration
+
+class Side(Enum):
+    buy = 1
+    sell = 2
 
 class Client(FIXEngine):
     def __init__(self):
@@ -59,6 +64,8 @@ class Client(FIXEngine):
         msg.setField(codec.protocol.fixtags.Currency, "GBP")
 
         connectionHandler.sendMsg(msg)
+        side = Side(int(msg.getField(codec.protocol.fixtags.Side)))
+        logging.debug("---> [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.msgType), msg.getField(codec.protocol.fixtags.ClOrdID), msg.getField(codec.protocol.fixtags.Symbol), side.name, msg.getField(codec.protocol.fixtags.OrderQty), msg.getField(codec.protocol.fixtags.Price)))
 
 
     def onLogin(self, connectionHandler, msg):
@@ -70,7 +77,9 @@ class Client(FIXEngine):
 
     def onExecutionReport(self, connectionHandler, msg):
         codec = connectionHandler.codec
-        logging.debug("Received ack for request: %s", msg[codec.protocol.fixtags.ClOrdID])
+        side = Side(int(msg.getField(codec.protocol.fixtags.Side)))
+        logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.getField(codec.protocol.fixtags.MsgType)), msg.getField(codec.protocol.fixtags.ClOrdID), msg.getField(codec.protocol.fixtags.Symbol), side.name, msg.getField(codec.protocol.fixtags.OrderQty), msg.getField(codec.protocol.fixtags.Price)))
+
 
 def main():
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
