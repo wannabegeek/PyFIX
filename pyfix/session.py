@@ -9,26 +9,25 @@ class FIXSession:
         self.senderCompId = senderCompId
         self.targetCompId = targetCompId
 
-        self.sndSeqNum = 1
-        self.rcvSeqNum = 1
+        self.sndSeqNum = 0
+        self.nextExpectedMsgSeqNum = 1
 
     def validateCompIds(self, targetCompId, senderCompId):
         return self.senderCompId == senderCompId and self.targetCompId == targetCompId
 
     def allocateSndSeqNo(self):
-        result = self.sndSeqNum
         self.sndSeqNum += 1
-        return str(result)
+        return str(self.sndSeqNum)
 
     def validateRecvSeqNo(self, seqNo):
-        if self.rcvSeqNum < int(seqNo):
-            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.rcvSeqNum) + ")")
-            return (False, self.rcvSeqNum)
+        if self.nextExpectedMsgSeqNum < int(seqNo):
+            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.nextExpectedMsgSeqNum) + ")")
+            return (False, self.nextExpectedMsgSeqNum)
         else:
             return (True, seqNo)
 
     def setRecvSeqNo(self, seqNo):
-        if self.rcvSeqNum != int(seqNo):
-            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.rcvSeqNum) + ")")
-        self.rcvSeqNum = int(seqNo) + 1
+        if self.nextExpectedMsgSeqNum != int(seqNo):
+            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.nextExpectedMsgSeqNum) + ")")
+        self.nextExpectedMsgSeqNum = int(seqNo) + 1
 

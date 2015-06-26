@@ -65,6 +65,8 @@ class FIXClientConnectionHandler(FIXConnectionHandler):
                 # in both cases we will just reset the seq number to the
                 # NewSeqNo received in the message
                 newSeqNo = msg[protocol.fixtags.NewSeqNo]
+                if msg[protocol.fixtags.GapFillFlag] == "Y":
+                    logging.info("Received SequenceReset(GapFill) filling gap from %s to %s" % (recvSeqNo, newSeqNo))
                 recvSeqNo = newSeqNo
         else:
             logging.warning("Can't process message, counterparty is not logged in")

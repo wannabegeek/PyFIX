@@ -20,7 +20,7 @@ class Journaler(object):
                                "session TEXT NOT NULL,"
                                "direction INTEGER NOT NULL,"
                                "msg TEXT,"
-                               "PRIMARY KEY (seqNo, session, direction)) WITHOUT ROWID")
+                               "PRIMARY KEY (seqNo, session, direction))")
 
         self.cursor.execute("CREATE TABLE IF NOT EXISTS session("
                                "sessionId INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -36,7 +36,7 @@ class Journaler(object):
         for sessionInfo in self.cursor:
             session = FIXSession(sessionInfo[0], sessionInfo[1], sessionInfo[2])
             session.sndSeqNum = sessionInfo[3]
-            session.rcvSeqNum = sessionInfo[4]
+            session.nextExpectedMsgSeqNum = sessionInfo[4] + 1
             sessions.append(session)
 
         return sessions

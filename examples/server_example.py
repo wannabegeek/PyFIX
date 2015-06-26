@@ -1,10 +1,13 @@
+from enum import Enum
 import logging
 from pyfix.connection import ConnectionState, MessageDirection
 from pyfix.engine import FIXEngine
 from pyfix.message import FIXMessage
 from pyfix.server_connection import FIXServer
-from pyfix.event import EventManager
 
+class Side(Enum):
+    buy = 1
+    sell = 2
 
 class Server(FIXEngine):
     def __init__(self):
@@ -43,27 +46,28 @@ class Server(FIXEngine):
 
     def onLogin(self, connectionHandler, msg):
         codec = connectionHandler.codec
-        logging.info("We're logged in now")
         logging.info("[" + msg[codec.protocol.fixtags.SenderCompID] + "] <---- " + codec.protocol.msgtype.msgTypeToName(msg[codec.protocol.fixtags.MsgType]))
 
     def onNewOrder(self, connectionHandler, request):
-        logging.debug("Received msg: %s" % (request,))
-        # respond with an ExecutionReport Ack
         codec = connectionHandler.codec
+        side = Side(int(request.getField(codec.protocol.fixtags.Side)))
+        logging.debug("Received msg: %s %s %s@%s" % (request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
+
+        # respond with an ExecutionReport Ack
         msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)
         msg.setField(codec.protocol.fixtags.Price, request.getField(codec.protocol.fixtags.Price))
         msg.setField(codec.protocol.fixtags.OrderQty, request.getField(codec.protocol.fixtags.OrderQty))
         msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.OrderQty))
         msg.setField(codec.protocol.fixtags.SecurityID, "GB00BH4HKS39")
         msg.setField(codec.protocol.fixtags.SecurityIDSource, "4")
-        msg.setField(codec.protocol.fixtags.Symbol, "VOD.L")
-        msg.setField(codec.protocol.fixtags.Account, "TEST")
+        msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.Symbol))
+        msg.setField(codec.protocol.fixtags.Account, request.getField(codec.protocol.fixtags.Account))
         msg.setField(codec.protocol.fixtags.HandlInst, "1")
         msg.setField(codec.protocol.fixtags.ExecType, "0")
         msg.setField(codec.protocol.fixtags.LeavesQty, "0")
         msg.setField(codec.protocol.fixtags.Side, request.getField(codec.protocol.fixtags.Side))
         msg.setField(codec.protocol.fixtags.ClOrdID, request.getField(codec.protocol.fixtags.ClOrdID))
-        msg.setField(codec.protocol.fixtags.Currency, "GBP")
+        msg.setField(codec.protocol.fixtags.Currency, request.getField(codec.protocol.fixtags.Currency))
 
         connectionHandler.sendMsg(msg)
 

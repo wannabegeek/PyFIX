@@ -122,7 +122,7 @@ class FIXConnectionHandler(object):
                         gapFillMsg = FIXMessage(protocol.msgtype.SEQUENCERESET)
                         gapFillMsg.setField(protocol.fixtags.GapFillFlag, 'Y')
                         gapFillMsg.setField(protocol.fixtags.MsgSeqNum, gapFillBegin)
-                        gapFillMsg.setField(protocol.fixtags.NewSeqNo, gapFillEnd)
+                        gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(int(gapFillEnd) + 1))
                         responses.append(gapFillMsg)
 
                         # and then resent the replayMsg
@@ -143,7 +143,7 @@ class FIXConnectionHandler(object):
             gapFillMsg = FIXMessage(protocol.msgtype.SEQUENCERESET)
             gapFillMsg.setField(protocol.fixtags.GapFillFlag, 'Y')
             gapFillMsg.setField(protocol.fixtags.MsgSeqNum, gapFillBegin)
-            gapFillMsg.setField(protocol.fixtags.NewSeqNo, gapFillEnd)
+            gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(int(gapFillEnd) + 1))
             responses.append(gapFillMsg)
 
         return responses
@@ -216,7 +216,7 @@ class FIXConnectionHandler(object):
             except KeyError:
                 pass
             finally:
-                logging.error("Failed to process message with duplicate seq no - disconnecting")
+                logging.error("Failed to process message with duplicate seq no (MsgSeqNum: %s) - disconnecting" % (recvSeqNo, ))
                 self.disconnect()
 
 
@@ -246,7 +246,7 @@ class FIXConnectionHandler(object):
         try:
             self._notifyMessageObservers(decodedMsg, MessageDirection.OUTBOUND)
         except DuplicateSeqNoError:
-            logging.error("We have sent a message with a duplicate seq no, failed to persist it")
+            logging.error("We have sent a message with a duplicate seq no, failed to persist it (MsgSeqNum: %s)" % (decodedMsg[self.codec.protocol.fixtags.MsgSeqNum]))
 
 
 class FIXEndPoint(object):
