@@ -55,7 +55,7 @@ class Journaler(object):
 
     def persistMsg(self, msg, session, direction):
         msgStr = pickle.dumps(msg)
-        seqNo = session.sndSeqNum if direction == MessageDirection.OUTBOUND else session.rcvSeqNum
+        seqNo = msg["34"]
         try:
             self.cursor.execute("INSERT INTO message VALUES(?, ?, ?, ?)", (seqNo, session.key, direction.value, msgStr))
             if direction == MessageDirection.OUTBOUND:

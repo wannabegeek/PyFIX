@@ -53,7 +53,7 @@ class FIXServerConnectionHandler(FIXConnectionHandler):
             elif msgType == protocol.msgtype.TESTREQUEST:
                 responses.append(protocol.messages.Messages.heartbeat())
             elif msgType == protocol.msgtype.RESENDREQUEST:
-                responses.append(protocol.messages.Messages.sequence_reset(msg, True))
+                responses.extend(self._handleResendRequest(msg))
             elif msgType == protocol.msgtype.SEQUENCERESET:
                 newSeqNo = msg[protocol.fixtags.NewSeqNo]
                 recvSeqNo = newSeqNo

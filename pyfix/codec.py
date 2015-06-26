@@ -2,6 +2,12 @@ from datetime import datetime
 import logging
 from pyfix.message import FIXMessage, FIXContext
 
+class EncodingError(Exception):
+    pass
+
+class DecodingError(Exception):
+    pass
+
 class RepeatingGroupContext(FIXContext):
     def __init__(self, tag, repeatingGroupTags, parent):
         self.tag = tag
@@ -42,7 +48,15 @@ class Codec(object):
             msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
             seqNo = msg[self.protocol.fixtags.MsgSeqNum]
         else:
-            seqNo = session.allocateSndSeqNo()
+            # if we have the PossDupFlag set, we need to send the message with the same seqNo
+            if self.protocol.fixtags.PossDupFlag in msg and msg[self.protocol.fixtags.PossDupFlag] == "Y":
+                try:
+                    seqNo = msg[self.protocol.fixtags.MsgSeqNum]
+                except KeyError:
+                    raise EncodingError("Failed to encode message with PossDupFlay=Y but no previous MsgSeqNum")
+            else:
+                seqNo = session.allocateSndSeqNo()
+
         body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, seqNo))
         body.append("%s=%s" % (self.protocol.fixtags.SendingTime, self.current_datetime()))
 

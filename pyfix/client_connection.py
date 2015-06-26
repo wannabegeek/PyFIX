@@ -1,6 +1,7 @@
 import logging
 import socket
 from pyfix.journaler import DuplicateSeqNoError
+from pyfix.message import FIXMessage
 from pyfix.session import FIXSession
 from pyfix.connection import FIXEndPoint, ConnectionState, MessageDirection, FIXConnectionHandler
 from pyfix.event import TimerEventRegistration
@@ -58,8 +59,11 @@ class FIXClientConnectionHandler(FIXConnectionHandler):
             elif msgType == protocol.msgtype.TESTREQUEST:
                 responses.append(protocol.messages.Messages.heartbeat())
             elif msgType == protocol.msgtype.RESENDREQUEST:
-                responses.append(protocol.messages.Messages.sequence_reset(msg, True))
+                responses.extend(self._handleResendRequest(msg))
             elif msgType == protocol.msgtype.SEQUENCERESET:
+                # we can treat GapFill and SequenceReset in the same way
+                # in both cases we will just reset the seq number to the
+                # NewSeqNo received in the message
                 newSeqNo = msg[protocol.fixtags.NewSeqNo]
                 recvSeqNo = newSeqNo
         else:

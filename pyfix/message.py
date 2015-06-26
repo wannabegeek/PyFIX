@@ -90,6 +90,9 @@ class FIXContext(object):
     def isRepeatingGroup(self, tag):
         return type(self.tags[tag]) is _FIXRepeatingGroupContainer
 
+    def __contains__(self, item):
+        return item in self.tags
+
     def __str__(self):
         r= ""
         allTags = []

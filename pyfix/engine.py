@@ -15,6 +15,10 @@ class FIXEngine(object):
         # this make any session we receive valid
         return True
 
+    def shouldResendMessage(self, session, msg):
+        # we should resend all application messages
+        return True
+
     def createSession(self, targetCompId, senderCompId):
         if self.findSessionByCompIds(targetCompId, senderCompId) is None:
             session = self.journaller.createSession(targetCompId, senderCompId)
