@@ -45,8 +45,15 @@ class Codec(object):
 
         seqNo = 0
         if msgType == self.protocol.msgtype.SEQUENCERESET:
-            msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
-            seqNo = msg[self.protocol.fixtags.MsgSeqNum]
+            if self.protocol.fixtags.GapFillFlag in msg and msg[self.protocol.fixtags.GapFillFlag] == "Y":
+                # in this case the sequence number should already be on the message
+                try:
+                    seqNo = msg[self.protocol.fixtags.MsgSeqNum]
+                except KeyError:
+                    raise EncodingError("SequenceReset with GapFill='Y' must have the MsgSeqNum already populated")
+            else:
+                msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
+                seqNo = msg[self.protocol.fixtags.MsgSeqNum]
         else:
             # if we have the PossDupFlag set, we need to send the message with the same seqNo
             if self.protocol.fixtags.PossDupFlag in msg and msg[self.protocol.fixtags.PossDupFlag] == "Y":

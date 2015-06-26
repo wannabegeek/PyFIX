@@ -21,13 +21,13 @@ class FIXSession:
 
     def validateRecvSeqNo(self, seqNo):
         if self.nextExpectedMsgSeqNum < int(seqNo):
-            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.nextExpectedMsgSeqNum) + ")")
+            logging.warning("SeqNum from client unexpected (Rcvd: %s Expected: %s)" % (seqNo, self.nextExpectedMsgSeqNum))
             return (False, self.nextExpectedMsgSeqNum)
         else:
             return (True, seqNo)
 
     def setRecvSeqNo(self, seqNo):
-        if self.nextExpectedMsgSeqNum != int(seqNo):
-            logging.warning("SeqNum from client unexpected (Rcvd:" + seqNo + " Expected:" + str(self.nextExpectedMsgSeqNum) + ")")
+        # if self.nextExpectedMsgSeqNum != int(seqNo):
+        #     logging.warning("SeqNum from client unexpected (Rcvd: %s Expected: %s)" % (seqNo, self.nextExpectedMsgSeqNum))
         self.nextExpectedMsgSeqNum = int(seqNo) + 1
 

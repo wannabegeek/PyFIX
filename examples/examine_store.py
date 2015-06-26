@@ -30,9 +30,9 @@ def main():
     else:
         # list all messages in that stream
         direction = None if args.direction == 'both' else MessageDirection.INBOUND if args.direction == "in" else MessageDirection.OUTBOUND
-        for (msg, msgDirection, session) in journal.getAllMsgs(args.sessions, direction):
+        for (seqNo, msg, msgDirection, session) in journal.getAllMsgs(args.sessions, direction):
             d = "---->" if msgDirection == MessageDirection.OUTBOUND.value else "<----"
-            print("{:>3} {:^5} {}".format(session, d, msg))
+            print("{:>3} {:^5} [{:>5}] {}".format(session, d, seqNo, msg))
 
 if __name__ == '__main__':
     main()

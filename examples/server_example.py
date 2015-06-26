@@ -51,7 +51,7 @@ class Server(FIXEngine):
     def onNewOrder(self, connectionHandler, request):
         codec = connectionHandler.codec
         side = Side(int(request.getField(codec.protocol.fixtags.Side)))
-        logging.debug("Received msg: %s %s %s@%s" % (request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
+        logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(request.getField(codec.protocol.fixtags.MsgType)), request.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
 
         # respond with an ExecutionReport Ack
         msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)
@@ -70,6 +70,7 @@ class Server(FIXEngine):
         msg.setField(codec.protocol.fixtags.Currency, request.getField(codec.protocol.fixtags.Currency))
 
         connectionHandler.sendMsg(msg)
+        logging.debug("---> [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.msgType), msg.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
 
 
 def main():

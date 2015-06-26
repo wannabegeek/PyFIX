@@ -1,4 +1,5 @@
 import importlib
+import sys
 from pyfix.codec import Codec
 from pyfix.journaler import DuplicateSeqNoError
 from pyfix.message import FIXMessage, MessageDirection
@@ -64,8 +65,9 @@ class FIXConnectionHandler(object):
     def disconnect(self):
         self.handle_close()
 
-    def _notifyMessageObservers(self, msg, direction):
-        self.engine.journaller.persistMsg(msg, self.session, direction)
+    def _notifyMessageObservers(self, msg, direction, persistMessage=True):
+        if persistMessage is True:
+            self.engine.journaller.persistMsg(msg, self.session, direction)
         for handler in filter(lambda x: (x[1] is None or x[1] == direction) and (x[2] is None or x[2] == msg.msgType), self.msgHandlers):
             handler[0](self, msg)
 
@@ -108,42 +110,47 @@ class FIXConnectionHandler(object):
 
         beginSeqNo = msg[protocol.fixtags.BeginSeqNo]
         endSeqNo = msg[protocol.fixtags.EndSeqNo]
+        if int(endSeqNo) == 0:
+            endSeqNo = sys.maxsize
         logging.info("Received resent request from %s to %s", beginSeqNo, endSeqNo)
         replayMsgs = self.engine.journaller.recoverMsgs(self.session, MessageDirection.OUTBOUND, beginSeqNo, endSeqNo)
-        gapFillBegin = beginSeqNo
-        gapFillEnd = beginSeqNo
+        gapFillBegin = int(beginSeqNo)
+        gapFillEnd = int(beginSeqNo)
         for replayMsg in replayMsgs:
+            msgSeqNum = int(replayMsg[protocol.fixtags.MsgSeqNum])
             if replayMsg[protocol.fixtags.MsgType] in protocol.msgtype.sessionMessageTypes:
-                gapFillEnd = replayMsg[protocol.fixtags.MsgSeqNum]
+                gapFillEnd = msgSeqNum + 1
             else:
                 if self.engine.shouldResendMessage(self.session, replayMsg):
-                    if gapFillBegin != gapFillEnd:
+                    if gapFillBegin < gapFillEnd:
                         # we need to send a gap fill message
                         gapFillMsg = FIXMessage(protocol.msgtype.SEQUENCERESET)
                         gapFillMsg.setField(protocol.fixtags.GapFillFlag, 'Y')
                         gapFillMsg.setField(protocol.fixtags.MsgSeqNum, gapFillBegin)
-                        gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(int(gapFillEnd) + 1))
+                        gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(gapFillEnd))
                         responses.append(gapFillMsg)
 
-                        # and then resent the replayMsg
-                        replayMsg.removeField(protocol.fixtags.BeginString)
-                        replayMsg.removeField(protocol.fixtags.BodyLength)
-                        replayMsg.removeField(protocol.fixtags.SendingTime)
-                        replayMsg.removeField(protocol.fixtags.SenderCompID)
-                        replayMsg.removeField(protocol.fixtags.TargetCompID)
-                        replayMsg.removeField(protocol.fixtags.CheckSum)
-                        replayMsg.setField(protocol.fixtags.PossDupFlag, "Y")
-                        responses.append(replayMsg)
-                else:
-                    gapFillEnd = replayMsg[protocol.fixtags.MsgSeqNum]
+                    # and then resent the replayMsg
+                    replayMsg.removeField(protocol.fixtags.BeginString)
+                    replayMsg.removeField(protocol.fixtags.BodyLength)
+                    replayMsg.removeField(protocol.fixtags.SendingTime)
+                    replayMsg.removeField(protocol.fixtags.SenderCompID)
+                    replayMsg.removeField(protocol.fixtags.TargetCompID)
+                    replayMsg.removeField(protocol.fixtags.CheckSum)
+                    replayMsg.setField(protocol.fixtags.PossDupFlag, "Y")
                     responses.append(replayMsg)
 
-        if gapFillBegin != gapFillEnd:
+                    gapFillBegin = msgSeqNum + 1
+                else:
+                    gapFillEnd = msgSeqNum + 1
+                    responses.append(replayMsg)
+
+        if gapFillBegin < gapFillEnd:
             # we need to send a gap fill message
             gapFillMsg = FIXMessage(protocol.msgtype.SEQUENCERESET)
             gapFillMsg.setField(protocol.fixtags.GapFillFlag, 'Y')
             gapFillMsg.setField(protocol.fixtags.MsgSeqNum, gapFillBegin)
-            gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(int(gapFillEnd) + 1))
+            gapFillMsg.setField(protocol.fixtags.NewSeqNo, str(gapFillEnd))
             responses.append(gapFillMsg)
 
         return responses
@@ -195,11 +202,15 @@ class FIXConnectionHandler(object):
 
             if seqNoState is False:
                 # We should send a resend request
-                responses.append(protocol.messages.Messages.resend_request(lastKnownSeqNo, recvSeqNo))
+                logging.info("Requesting resend of messages: %s to %s" % (lastKnownSeqNo, 0))
+                responses.append(protocol.messages.Messages.resend_request(lastKnownSeqNo, 0))
+                # we still need to notify if we are processing Logon message
+                if msgType == protocol.msgtype.LOGON:
+                    self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND, False)
             else:
                 self.session.setRecvSeqNo(recvSeqNo)
+                self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
 
-            self._notifyMessageObservers(decodedMsg, MessageDirection.INBOUND)
 
             for m in responses:
                 self.sendMsg(m)
@@ -216,7 +227,7 @@ class FIXConnectionHandler(object):
             except KeyError:
                 pass
             finally:
-                logging.error("Failed to process message with duplicate seq no (MsgSeqNum: %s) - disconnecting" % (recvSeqNo, ))
+                logging.error("Failed to process message with duplicate seq no (MsgSeqNum: %s) (and no PossDupFlag='Y') - disconnecting" % (recvSeqNo, ))
                 self.disconnect()
 
 

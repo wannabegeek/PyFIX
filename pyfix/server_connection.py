@@ -56,6 +56,7 @@ class FIXServerConnectionHandler(FIXConnectionHandler):
                 responses.extend(self._handleResendRequest(msg))
             elif msgType == protocol.msgtype.SEQUENCERESET:
                 newSeqNo = msg[protocol.fixtags.NewSeqNo]
+                self.session.setRecvSeqNo(int(newSeqNo) - 1)
                 recvSeqNo = newSeqNo
         else:
             logging.warning("Can't process message, counterparty is not logged in")

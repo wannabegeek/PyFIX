@@ -75,14 +75,14 @@ class Journaler(object):
             return None
 
     def recoverMsgs(self, session, direction, startSeqNo, endSeqNo):
-        self.cursor.execute("SELECT msg FROM message WHERE session = ? AND direction = ? AND seqNo >= ? AND seqNo <= ?", (session.key, direction.value, startSeqNo, endSeqNo))
+        self.cursor.execute("SELECT msg FROM message WHERE session = ? AND direction = ? AND seqNo >= ? AND seqNo <= ? ORDER BY seqNo", (session.key, direction.value, startSeqNo, endSeqNo))
         msgs = []
         for msg in self.cursor:
             msgs.append(pickle.loads(msg[0]))
         return msgs
 
     def getAllMsgs(self, sessions = [], direction = None):
-        sql = "SELECT msg, direction, session FROM message"
+        sql = "SELECT seqNo, msg, direction, session FROM message"
         clauses = []
         args = []
         if sessions is not None and len(sessions) != 0:
@@ -95,9 +95,11 @@ class Journaler(object):
         if clauses:
             sql = sql + " WHERE " + " AND ".join(clauses)
 
+        sql = sql + " ORDER BY rowid"
+
         self.cursor.execute(sql, tuple(args))
         msgs = []
         for msg in self.cursor:
-            msgs.append((pickle.loads(msg[0]), msg[1], msg[2]))
+            msgs.append((msg[0], pickle.loads(msg[1]), msg[2], msg[3]))
 
         return msgs
