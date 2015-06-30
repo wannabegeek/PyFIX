@@ -24,17 +24,17 @@ class Codec(object):
     def current_datetime():
         return datetime.utcnow().strftime("%Y%m%d-%H:%M:%S.%f")[:-3]
 
-    def addTag(self, body, t, msg):
+    def _addTag(self, body, t, msg):
         if msg.isRepeatingGroup(t):
             count, groups = msg.getRepeatingGroup(t)
             body.append("%s=%s" % (t, count))
             for group in groups:
                 for tag in group.tags:
-                    self.addTag(body, tag, group)
+                    self._addTag(body, tag, group)
         else:
             body.append("%s=%s" % (t, msg[t]))
 
-    def pack(self, msg, session):
+    def encode(self, msg, session):
         # Create body
         body = []
 
@@ -68,7 +68,7 @@ class Codec(object):
         body.append("%s=%s" % (self.protocol.fixtags.SendingTime, self.current_datetime()))
 
         for t in msg.tags:
-            self.addTag(body, t, msg)
+            self._addTag(body, t, msg)
 
         # Enable easy change when debugging
         SEP = self.SOH
@@ -91,7 +91,7 @@ class Codec(object):
 
         return fixmsg + SEP
 
-    def parse(self, rawmsg):
+    def decode(self, rawmsg):
         #msg = rawmsg.rstrip(os.linesep).split(SOH)
         try:
             rawmsg = rawmsg.decode('utf-8')

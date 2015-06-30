@@ -48,17 +48,6 @@ class FIXConnectionHandler(object):
         self.socketEvent = FileDescriptorEventRegistration(self.handle_read, sock, EventType.READ)
         self.engine.eventManager.registerHandler(self.socketEvent)
 
-    def sessionKey(self, context):
-        if type(context) is FIXMessage:
-            return "%s_%s" % (context[self.codec.protocol.fixtags.SenderCompID], context[self.codec.protocol.fixtags.TargetCompID])
-        elif type(context) is FIXSession:
-            return "%s_%s" % (context.senderCompID, context.targetCompID)
-        else:
-            raise RuntimeError("Can't generate session key from object")
-
-    def sessionKeyFromCompIds(self, targetCompId, senderCompId):
-        return "%s_%s" % (senderCompId, targetCompId)
-
     def address(self):
         return self.addr
 
@@ -81,18 +70,18 @@ class FIXConnectionHandler(object):
         for h in remove:
             self.msgHandlers.remove(h)
 
-    def sendHeartbeat(self):
+    def _sendHeartbeat(self):
         self.sendMsg(self.codec.protocol.messages.Messages.heartbeat())
 
-    def expectedHeartbeat(self, type, closure):
+    def _expectedHeartbeat(self, type, closure):
         logging.warning("Expected heartbeat from peer %s" % (self.expectedHeartbeatRegistration ,))
         self.sendMsg(self.codec.protocol.messages.Messages.test_request())
 
     def registerLoggedIn(self):
-        self.heartbeatTimerRegistration = TimerEventRegistration(lambda type, closure: self.sendHeartbeat(), self.heartbeatPeriod)
+        self.heartbeatTimerRegistration = TimerEventRegistration(lambda type, closure: self._sendHeartbeat(), self.heartbeatPeriod)
         self.engine.eventManager.registerHandler(self.heartbeatTimerRegistration)
         # register timeout for 10% more than we expect
-        self.expectedHeartbeatRegistration = TimerEventRegistration(self.expectedHeartbeat, self.heartbeatPeriod * 1.10)
+        self.expectedHeartbeatRegistration = TimerEventRegistration(self._expectedHeartbeat, self.heartbeatPeriod * 1.10)
         self.engine.eventManager.registerHandler(self.expectedHeartbeatRegistration)
 
 
@@ -161,11 +150,11 @@ class FIXConnectionHandler(object):
             msg = self.sock.recv(8192)
             if msg:
                 self.msgBuffer = self.msgBuffer + msg
-                (decodedMsg, parsedLength) = self.codec.parse(self.msgBuffer)
+                (decodedMsg, parsedLength) = self.codec.decode(self.msgBuffer)
                 self.msgBuffer = self.msgBuffer[parsedLength:]
                 while decodedMsg is not None and self.connectionState != ConnectionState.DISCONNECTED:
                     self.processMessage(decodedMsg)
-                    (decodedMsg, parsedLength) = self.codec.parse(self.msgBuffer)
+                    (decodedMsg, parsedLength) = self.codec.decode(self.msgBuffer)
                     self.msgBuffer = self.msgBuffer[parsedLength:]
                 if self.expectedHeartbeatRegistration is not None:
                     self.expectedHeartbeatRegistration.reset()
@@ -247,12 +236,12 @@ class FIXConnectionHandler(object):
         if self.connectionState != ConnectionState.CONNECTED and self.connectionState != ConnectionState.LOGGED_IN:
             raise FIXException(FIXException.FIXExceptionReason.NOT_CONNECTED)
 
-        encodedMsg = self.codec.pack(msg, self.session).encode('utf-8')
+        encodedMsg = self.codec.encode(msg, self.session).encode('utf-8')
         self.sock.send(encodedMsg)
         if self.heartbeatTimerRegistration is not None:
             self.heartbeatTimerRegistration.reset()
 
-        decodedMsg, junk = self.codec.parse(encodedMsg)
+        decodedMsg, junk = self.codec.decode(encodedMsg)
 
         try:
             self._notifyMessageObservers(decodedMsg, MessageDirection.OUTBOUND)

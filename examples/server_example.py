@@ -50,27 +50,38 @@ class Server(FIXEngine):
 
     def onNewOrder(self, connectionHandler, request):
         codec = connectionHandler.codec
-        side = Side(int(request.getField(codec.protocol.fixtags.Side)))
-        logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(request.getField(codec.protocol.fixtags.MsgType)), request.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
+        try:
+            side = Side(int(request.getField(codec.protocol.fixtags.Side)))
+            logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(request.getField(codec.protocol.fixtags.MsgType)), request.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
 
-        # respond with an ExecutionReport Ack
-        msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)
-        msg.setField(codec.protocol.fixtags.Price, request.getField(codec.protocol.fixtags.Price))
-        msg.setField(codec.protocol.fixtags.OrderQty, request.getField(codec.protocol.fixtags.OrderQty))
-        msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.OrderQty))
-        msg.setField(codec.protocol.fixtags.SecurityID, "GB00BH4HKS39")
-        msg.setField(codec.protocol.fixtags.SecurityIDSource, "4")
-        msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.Symbol))
-        msg.setField(codec.protocol.fixtags.Account, request.getField(codec.protocol.fixtags.Account))
-        msg.setField(codec.protocol.fixtags.HandlInst, "1")
-        msg.setField(codec.protocol.fixtags.ExecType, "0")
-        msg.setField(codec.protocol.fixtags.LeavesQty, "0")
-        msg.setField(codec.protocol.fixtags.Side, request.getField(codec.protocol.fixtags.Side))
-        msg.setField(codec.protocol.fixtags.ClOrdID, request.getField(codec.protocol.fixtags.ClOrdID))
-        msg.setField(codec.protocol.fixtags.Currency, request.getField(codec.protocol.fixtags.Currency))
+            # respond with an ExecutionReport Ack
+            msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)
+            msg.setField(codec.protocol.fixtags.Price, request.getField(codec.protocol.fixtags.Price))
+            msg.setField(codec.protocol.fixtags.OrderQty, request.getField(codec.protocol.fixtags.OrderQty))
+            msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.OrderQty))
+            msg.setField(codec.protocol.fixtags.SecurityID, "GB00BH4HKS39")
+            msg.setField(codec.protocol.fixtags.SecurityIDSource, "4")
+            msg.setField(codec.protocol.fixtags.Symbol, request.getField(codec.protocol.fixtags.Symbol))
+            msg.setField(codec.protocol.fixtags.Account, request.getField(codec.protocol.fixtags.Account))
+            msg.setField(codec.protocol.fixtags.HandlInst, "1")
+            msg.setField(codec.protocol.fixtags.OrdStatus, "0")
+            msg.setField(codec.protocol.fixtags.ExecType, "0")
+            msg.setField(codec.protocol.fixtags.LeavesQty, "0")
+            msg.setField(codec.protocol.fixtags.Side, request.getField(codec.protocol.fixtags.Side))
+            msg.setField(codec.protocol.fixtags.ClOrdID, request.getField(codec.protocol.fixtags.ClOrdID))
+            msg.setField(codec.protocol.fixtags.Currency, request.getField(codec.protocol.fixtags.Currency))
 
-        connectionHandler.sendMsg(msg)
-        logging.debug("---> [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.msgType), msg.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
+            connectionHandler.sendMsg(msg)
+            logging.debug("---> [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.msgType), msg.getField(codec.protocol.fixtags.ClOrdID), request.getField(codec.protocol.fixtags.Symbol), side.name, request.getField(codec.protocol.fixtags.OrderQty), request.getField(codec.protocol.fixtags.Price)))
+        except Exception as e:
+            msg = FIXMessage(codec.protocol.msgtype.EXECUTIONREPORT)
+            msg.setField(codec.protocol.fixtags.OrdStatus, "4")
+            msg.setField(codec.protocol.fixtags.ExecType, "4")
+            msg.setField(codec.protocol.fixtags.LeavesQty, "0")
+            msg.setField(codec.protocol.fixtags.Text, str(e))
+            msg.setField(codec.protocol.fixtags.ClOrdID, request.getField(codec.protocol.fixtags.ClOrdID))
+
+            connectionHandler.sendMsg(msg)
 
 
 def main():

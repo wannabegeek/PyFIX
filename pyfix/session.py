@@ -1,8 +1,5 @@
 import logging
 
-import os
-import mmap
-
 class FIXSession:
     def __init__(self, key, targetCompId, senderCompId):
         self.key = key
