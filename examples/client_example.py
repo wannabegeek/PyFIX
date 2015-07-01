@@ -51,8 +51,8 @@ class Client(FIXEngine):
         self.clOrdID = self.clOrdID + 1
         codec = connectionHandler.codec
         msg = FIXMessage(codec.protocol.msgtype.NEWORDERSINGLE)
-        msg.setField(codec.protocol.fixtags.Price, random.random() * 1000)
-        msg.setField(codec.protocol.fixtags.OrderQty, int(random.random() * 10000))
+        msg.setField(codec.protocol.fixtags.Price, "%0.2f" % (random.random() * 2 + 10))
+        msg.setField(codec.protocol.fixtags.OrderQty, int(random.random() * 100))
         msg.setField(codec.protocol.fixtags.Symbol, "VOD.L")
         msg.setField(codec.protocol.fixtags.SecurityID, "GB00BH4HKS39")
         msg.setField(codec.protocol.fixtags.SecurityIDSource, "4")
@@ -72,14 +72,20 @@ class Client(FIXEngine):
         logging.info("Logged in")
 
         # lets do something like send and order every 3 seconds
-        self.msgGenerator = TimerEventRegistration(lambda type, closure: self.sendOrder(closure), 3.0, connectionHandler)
+        self.msgGenerator = TimerEventRegistration(lambda type, closure: self.sendOrder(closure), 0.5, connectionHandler)
         self.eventManager.registerHandler(self.msgGenerator)
 
     def onExecutionReport(self, connectionHandler, msg):
         codec = connectionHandler.codec
-        side = Side(int(msg.getField(codec.protocol.fixtags.Side)))
-        logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.getField(codec.protocol.fixtags.MsgType)), msg.getField(codec.protocol.fixtags.ClOrdID), msg.getField(codec.protocol.fixtags.Symbol), side.name, msg.getField(codec.protocol.fixtags.OrderQty), msg.getField(codec.protocol.fixtags.Price)))
-
+        if codec.protocol.fixtags.ExecType in msg:
+            if msg.getField(codec.protocol.fixtags.ExecType) == "0":
+                side = Side(int(msg.getField(codec.protocol.fixtags.Side)))
+                logging.debug("<--- [%s] %s: %s %s %s@%s" % (codec.protocol.msgtype.msgTypeToName(msg.getField(codec.protocol.fixtags.MsgType)), msg.getField(codec.protocol.fixtags.ClOrdID), msg.getField(codec.protocol.fixtags.Symbol), side.name, msg.getField(codec.protocol.fixtags.OrderQty), msg.getField(codec.protocol.fixtags.Price)))
+            elif msg.getField(codec.protocol.fixtags.ExecType) == "4":
+                reason = "Unknown" if codec.protocol.fixtags.Text not in msg else msg.getField(codec.protocol.fixtags.Text)
+                logging.info("Order Rejected '%s'" % (reason,))
+        else:
+            logging.error("Received execution report without ExecType")
 
 def main():
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
