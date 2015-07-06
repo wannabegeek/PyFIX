@@ -1,63 +1,71 @@
 import logging
 import socket
+from pyfix.journaler import DuplicateSeqNoError
 from pyfix.session import FIXSession
 from pyfix.connection import FIXEndPoint, ConnectionState, MessageDirection, FIXConnectionHandler
 from pyfix.event import FileDescriptorEventRegistration, EventType
 
-connectedSessions = {}
-
 class FIXServerConnectionHandler(FIXConnectionHandler):
-    def __init__(self, eventMgr, protocol, sock=None, addr=None, observer=None):
-        FIXConnectionHandler.__init__(self, eventMgr, protocol, sock, addr, observer)
+    def __init__(self, engine, protocol, sock=None, addr=None, observer=None):
+        FIXConnectionHandler.__init__(self, engine, protocol, sock, addr, observer)
 
-    def processMessage(self, decodedMsg):
+    def handleSessionMessage(self, msg):
         protocol = self.codec.protocol
-        # Find out session if it exists
-        if self.session is None:
-            if decodedMsg[protocol.fixtags.SenderCompID] not in connectedSessions:
-                self.session = FIXSession(decodedMsg[protocol.fixtags.TargetCompID], decodedMsg[protocol.fixtags.SenderCompID])
-                connectedSessions[decodedMsg[protocol.fixtags.SenderCompID]] = self.session
+
+        recvSeqNo = msg[protocol.fixtags.MsgSeqNum]
+
+        msgType = msg[protocol.fixtags.MsgType]
+        targetCompId = msg[protocol.fixtags.TargetCompID]
+        senderCompId = msg[protocol.fixtags.SenderCompID]
+        responses = []
+
+        if msgType == protocol.msgtype.LOGON:
+            if self.connectionState == ConnectionState.LOGGED_IN:
+                logging.warning("Client session already logged in - ignoring login request")
             else:
-                self.session = connectedSessions[decodedMsg[protocol.fixtags.SenderCompID]]
+                # compids are reversed here...
+                self.session = self.engine.getOrCreateSessionFromCompIds(senderCompId, targetCompId)
+                if self.session is not None:
+                    try:
+                        self.connectionState = ConnectionState.LOGGED_IN
+                        self.heartbeatPeriod = float(msg[protocol.fixtags.HeartBtInt])
+                        responses.append(protocol.messages.Messages.logon())
+                        self.registerLoggedIn()
+                    except DuplicateSeqNoError:
+                        logging.error("Failed to process login request with duplicate seq no")
+                        self.disconnect()
+                        return
+                else:
+                    logging.warning("Rejected login attempt for invalid session (SenderCompId: %s, TargetCompId: %s)" % (senderCompId, targetCompId))
+                    self.disconnect()
+                    return # we have to return here since self.session won't be valid
+        elif self.connectionState == ConnectionState.LOGGED_IN:
+            # compids are reversed here
+            if not self.session.validateCompIds(senderCompId, targetCompId):
+                logging.error("Received message with unexpected comp ids")
+                self.disconnect()
+                return
 
-        # validate the seq number
-        recvSeqNo = decodedMsg[protocol.fixtags.MsgSeqNum]
-        (seqNoState, lastKnownSeqNo) = self.session.validateRecvSeqNo(recvSeqNo)
-
-        for handler in filter(lambda x: (x[1] is None or x[1] == MessageDirection.INBOUND) and
-            (x[2] is None or x[2] == decodedMsg[protocol.fixtags.MsgType]), self.msgHandlers):
-            handler[0](self, decodedMsg)
-
-        if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGON:
-            self.connectionState = ConnectionState.LOGGED_IN
-            self.heartbeatPeriod = float(decodedMsg[protocol.fixtags.HeartBtInt])
-            msg = self.codec.pack(protocol.messages.Messages.logon(), self.session)
-            self.sendMsg(msg)
-            self.registerLoggedIn()
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGOUT:
-            self.connectionState = ConnectionState.LOGGED_OUT
-            self.registerLoggedOut()
-            self.handle_close()
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.TESTREQUEST:
-            msg = self.codec.pack(protocol.messages.Messages.heartbeat(), self.session)
-            self.sendMsg(msg)
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.RESENDREQUEST:
-            msg = self.codec.pack(protocol.messages.Messages.sequence_reset(decodedMsg, True), self.session)
-            self.sendMsg(msg)
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.SEQUENCERESET:
-            newSeqNo = decodedMsg[protocol.fixtags.NewSeqNo]
-            recvSeqNo = newSeqNo
-
-        if seqNoState is False:
-            # We should send a resend request
-            msg = self.codec.pack(protocol.messages.Messages.resend_request(lastKnownSeqNo, recvSeqNo), self.session)
-            self.sendMsg(msg)
+            if msgType == protocol.msgtype.LOGOUT:
+                self.connectionState = ConnectionState.LOGGED_OUT
+                self.registerLoggedOut()
+                self.handle_close()
+            elif msgType == protocol.msgtype.TESTREQUEST:
+                responses.append(protocol.messages.Messages.heartbeat())
+            elif msgType == protocol.msgtype.RESENDREQUEST:
+                responses.extend(self._handleResendRequest(msg))
+            elif msgType == protocol.msgtype.SEQUENCERESET:
+                newSeqNo = msg[protocol.fixtags.NewSeqNo]
+                self.session.setRecvSeqNo(int(newSeqNo) - 1)
+                recvSeqNo = newSeqNo
         else:
-            self.session.setRecvSeqNo(recvSeqNo)
+            logging.warning("Can't process message, counterparty is not logged in")
+
+        return (recvSeqNo, responses)
 
 class FIXServer(FIXEndPoint):
-    def __init__(self, eventMgr, protocol):
-     FIXEndPoint.__init__(self, eventMgr, protocol)
+    def __init__(self, engine, protocol):
+     FIXEndPoint.__init__(self, engine, protocol)
 
     def start(self, host, port):
         self.connections = []
@@ -68,21 +76,21 @@ class FIXServer(FIXEndPoint):
         self.serverSocketRegistration = FileDescriptorEventRegistration(self.handle_accept, self.socket, EventType.READ)
 
         logging.debug("Awaiting Connections " + host + ":" + str(port))
-        self.eventMgr.registerHandler(self.serverSocketRegistration)
+        self.engine.eventManager.registerHandler(self.serverSocketRegistration)
 
     def stop(self):
         logging.info("Stopping server connections")
         for connection in self.connections:
             connection.disconnect()
         self.serverSocketRegistration.fd.close()
-        self.eventMgr.unregisterHandler(self.serverSocketRegistration)
+        self.engine.eventManager.unregisterHandler(self.serverSocketRegistration)
 
     def handle_accept(self, type, closure):
         pair = self.socket.accept()
         if pair is not None:
             sock, addr = pair
             logging.info("Connection from %s" % repr(addr))
-            connection = FIXServerConnectionHandler(self.eventMgr, self.protocol, sock, addr, self)
+            connection = FIXServerConnectionHandler(self.engine, self.protocol, sock, addr, self)
             self.connections.append(connection)
             for handler in filter(lambda x: x[1] == ConnectionState.CONNECTED, self.connectionHandlers):
                     handler[0](connection)

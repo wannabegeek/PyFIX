@@ -1,6 +1,6 @@
 import datetime
 import unittest
-from pyfix.event import EventManager, TimerEventRegistration, reset
+from pyfix.event import EventManager, TimerEventRegistration
 
 
 class EventTimerTests(unittest.TestCase):

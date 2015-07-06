@@ -1,27 +1,32 @@
 from collections import OrderedDict
+from enum import Enum
+
+class MessageDirection(Enum):
+    INBOUND = 0
+    OUTBOUND = 1
+
+class _FIXRepeatingGroupContainer:
+    def __init__(self):
+        self.groups = []
+
+    def addGroup(self, group, index):
+        if index == -1:
+            self.groups.append(group)
+        else:
+            self.groups.insert(index, group)
+
+    def removeGroup(self, index):
+        del self.groups[index]
+
+    def getGroup(self, index):
+        return self.groups[index]
+
+    def __str__(self):
+        return str(len(self.groups)) + "=>" + str(self.groups)
+
+    __repr__ = __str__
 
 class FIXContext(object):
-    class FIXRepeatingGroupContainer:
-        def __init__(self):
-            self.groups = []
-
-        def addGroup(self, group, index):
-            if index == -1:
-                self.groups.append(group)
-            else:
-                self.groups.insert(index, group)
-
-        def removeGroup(self, index):
-            del self.groups[index]
-
-        def getGroup(self, index):
-            return self.groups[index]
-
-        def __str__(self):
-            return str(len(self.groups)) + "=>" + str(self.groups)
-
-        __repr__ = __str__
-
     def __init__(self):
         self.tags = OrderedDict()
 
@@ -42,7 +47,7 @@ class FIXContext(object):
             groupContainer = self.tags[tag]
             groupContainer.addGroup(group, index)
         else:
-            groupContainer = FIXMessage.FIXRepeatingGroupContainer()
+            groupContainer = _FIXRepeatingGroupContainer()
             groupContainer.addGroup(group, index)
             self.tags[tag] = groupContainer
 
@@ -83,7 +88,10 @@ class FIXContext(object):
         self.setField(tag, value)
 
     def isRepeatingGroup(self, tag):
-        return type(self.tags[tag]) is FIXMessage.FIXRepeatingGroupContainer
+        return type(self.tags[tag]) is _FIXRepeatingGroupContainer
+
+    def __contains__(self, item):
+        return item in self.tags
 
     def __str__(self):
         r= ""
@@ -92,6 +100,10 @@ class FIXContext(object):
             allTags.append("%s=%s" % (tag, self.tags[tag]))
         r += "|".join(allTags)
         return r
+
+    def __eq__(self, other):
+        # if our string representation looks the same, the objects are equivalent
+        return self.__str__() == other.__str__()
 
     __repr__ = __str__
 

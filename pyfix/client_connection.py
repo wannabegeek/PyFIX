@@ -1,14 +1,14 @@
 import logging
 import socket
+from pyfix.journaler import DuplicateSeqNoError
+from pyfix.message import FIXMessage
 from pyfix.session import FIXSession
 from pyfix.connection import FIXEndPoint, ConnectionState, MessageDirection, FIXConnectionHandler
 from pyfix.event import TimerEventRegistration
 
-connectedSessions = {}
-
 class FIXClientConnectionHandler(FIXConnectionHandler):
-    def __init__(self, eventMgr, protocol, targetCompId, senderCompId, sock=None, addr=None, observer=None, targetSubId = None, senderSubId = None, heartbeatTimeout = 30):
-        FIXConnectionHandler.__init__(self, eventMgr, protocol, sock, addr, observer)
+    def __init__(self, engine, protocol, targetCompId, senderCompId, sock=None, addr=None, observer=None, targetSubId = None, senderSubId = None, heartbeatTimeout = 30):
+        FIXConnectionHandler.__init__(self, engine, protocol, sock, addr, observer)
 
         self.targetCompId = targetCompId
         self.senderCompId = senderCompId
@@ -17,61 +17,74 @@ class FIXClientConnectionHandler(FIXConnectionHandler):
         self.heartbeatPeriod = float(heartbeatTimeout)
 
         # we need to send a login request.
-        self.session = FIXSession(self.senderCompId, self.targetCompId)
-        connectedSessions[self.senderCompId] = self.session
-        msg = self.codec.pack(protocol.messages.Messages.logon(), self.session)
-        self.sendMsg(msg)
-
-    def processMessage(self, decodedMsg):
-        protocol = self.codec.protocol
-
-        # Find out session if it exists
+        self.session = self.engine.getOrCreateSessionFromCompIds(self.targetCompId, self.senderCompId)
         if self.session is None:
-            self.session = connectedSessions[decodedMsg[protocol.fixtags.SenderCompID]]
+            raise RuntimeError("Failed to create client session")
 
-        # validate the seq number
-        recvSeqNo = decodedMsg[protocol.fixtags.MsgSeqNum]
-        (seqNoState, lastKnownSeqNo) = self.session.validateRecvSeqNo(recvSeqNo)
+        self.sendMsg(protocol.messages.Messages.logon())
 
-        for handler in filter(lambda x: (x[1] is None or x[1] == MessageDirection.INBOUND) and
-            (x[2] is None or x[2] == decodedMsg[protocol.fixtags.MsgType]), self.msgHandlers):
-            handler[0](self, decodedMsg)
+    def handleSessionMessage(self, msg):
+        protocol = self.codec.protocol
+        responses = []
 
-        if decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGON:
-            self.connectionState = ConnectionState.LOGGED_IN
-            self.registerLoggedIn()
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.LOGOUT:
-            self.connectionState = ConnectionState.LOGGED_OUT
-            self.registerLoggedOut()
-            self.handle_close()
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.TESTREQUEST:
-            msg = self.codec.pack(protocol.messages.Messages.heartbeat(), self.session)
-            self.sendMsg(msg)
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.RESENDREQUEST:
-            msg = self.codec.pack(protocol.messages.Messages.sequence_reset(decodedMsg, True), self.session)
-            self.sendMsg(msg)
-        elif decodedMsg[protocol.fixtags.MsgType] == protocol.msgtype.SEQUENCERESET:
-            newSeqNo = decodedMsg[protocol.fixtags.NewSeqNo]
-            recvSeqNo = newSeqNo
+        recvSeqNo = msg[protocol.fixtags.MsgSeqNum]
 
-        if seqNoState is False:
-            # We should send a resend request
-            msg = self.codec.pack(protocol.messages.Messages.resend_request(lastKnownSeqNo, recvSeqNo), self.session)
-            self.sendMsg(msg)
+        msgType = msg[protocol.fixtags.MsgType]
+        targetCompId = msg[protocol.fixtags.TargetCompID]
+        senderCompId = msg[protocol.fixtags.SenderCompID]
+
+        if msgType == protocol.msgtype.LOGON:
+            if self.connectionState == ConnectionState.LOGGED_IN:
+                logging.warning("Client session already logged in - ignoring login request")
+            else:
+                try:
+                    self.connectionState = ConnectionState.LOGGED_IN
+                    self.heartbeatPeriod = float(msg[protocol.fixtags.HeartBtInt])
+                    self.registerLoggedIn()
+                except DuplicateSeqNoError:
+                    logging.error("Failed to process login request with duplicate seq no")
+                    self.disconnect()
+                    return
+        elif self.connectionState == ConnectionState.LOGGED_IN:
+            # compids are reversed here
+            if not self.session.validateCompIds(senderCompId, targetCompId):
+                logging.error("Received message with unexpected comp ids")
+                self.disconnect()
+                return
+
+            if msgType == protocol.msgtype.LOGOUT:
+                self.connectionState = ConnectionState.LOGGED_OUT
+                self.registerLoggedOut()
+                self.handle_close()
+            elif msgType == protocol.msgtype.TESTREQUEST:
+                responses.append(protocol.messages.Messages.heartbeat())
+            elif msgType == protocol.msgtype.RESENDREQUEST:
+                responses.extend(self._handleResendRequest(msg))
+            elif msgType == protocol.msgtype.SEQUENCERESET:
+                # we can treat GapFill and SequenceReset in the same way
+                # in both cases we will just reset the seq number to the
+                # NewSeqNo received in the message
+                newSeqNo = msg[protocol.fixtags.NewSeqNo]
+                if msg[protocol.fixtags.GapFillFlag] == "Y":
+                    logging.info("Received SequenceReset(GapFill) filling gap from %s to %s" % (recvSeqNo, newSeqNo))
+                self.session.setRecvSeqNo(int(newSeqNo) - 1)
+                recvSeqNo = newSeqNo
         else:
-            self.session.setRecvSeqNo(recvSeqNo)
+            logging.warning("Can't process message, counterparty is not logged in")
+
+        return (recvSeqNo, responses)
 
 
 
 class FIXClient(FIXEndPoint):
-    def __init__(self, eventMgr, protocol, targetCompId, senderCompId, targetSubId = None, senderSubId = None, heartbeatTimeout = 30):
+    def __init__(self, engine, protocol, targetCompId, senderCompId, targetSubId = None, senderSubId = None, heartbeatTimeout = 30):
         self.targetCompId = targetCompId
         self.senderCompId = senderCompId
         self.targetSubId = targetSubId
         self.senderSubId = senderSubId
         self.heartbeatTimeout = heartbeatTimeout
 
-        FIXEndPoint.__init__(self, eventMgr, protocol)
+        FIXEndPoint.__init__(self, engine, protocol)
 
     def tryConnecting(self, type, closure):
         try:
@@ -79,13 +92,14 @@ class FIXClient(FIXEndPoint):
             logging.debug("Attempting Connection to " + self.host + ":" + str(self.port))
             self.socket.connect((self.host, self.port))
             if self.connectionRetryTimer is not None:
-                self.eventMgr.unregisterHandler(self.connectionRetryTimer)
+                self.engine.eventManager.unregisterHandler(self.connectionRetryTimer)
+                self.connectionRetryTimer = None
             self.connected()
         except socket.error as why:
             logging.error("Connection failed, trying again in 5s")
             if self.connectionRetryTimer is None:
                 self.connectionRetryTimer = TimerEventRegistration(self.tryConnecting, 5.0)
-                self.eventMgr.registerHandler(self.connectionRetryTimer)
+                self.engine.eventManager.registerHandler(self.connectionRetryTimer)
 
     def start(self, host, port):
         self.host = host
@@ -98,7 +112,7 @@ class FIXClient(FIXEndPoint):
     def connected(self):
         self.addr = (self.host, self.port)
         logging.info("Connected to %s" % repr(self.addr))
-        connection = FIXClientConnectionHandler(self.eventMgr, self.protocol, self.targetCompId, self.senderCompId, self.socket, self.addr, self, self.targetSubId, self.senderSubId, self.heartbeatTimeout)
+        connection = FIXClientConnectionHandler(self.engine, self.protocol, self.targetCompId, self.senderCompId, self.socket, self.addr, self, self.targetSubId, self.senderSubId, self.heartbeatTimeout)
         self.connections.append(connection)
         for handler in filter(lambda x: x[1] == ConnectionState.CONNECTED, self.connectionHandlers):
                 handler[0](connection)

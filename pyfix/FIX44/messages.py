@@ -31,6 +31,14 @@ class Messages(object):
         msg.setField(fixtags.GapFillFlag, 'Y' if isGapFill else 'N')
         msg.setField(fixtags.MsgSeqNum, respondingTo[fixtags.BeginSeqNo])
         return msg
+    #
+    # @staticmethod
+    # def sequence_reset(beginSeqNo, endSeqNo, isGapFill):
+    #     msg = FIXMessage(msgtype.SEQUENCERESET)
+    #     msg.setField(fixtags.GapFillFlag, 'Y' if isGapFill else 'N')
+    #     msg.setField(fixtags.MsgSeqNum, respondingTo[fixtags.BeginSeqNo])
+    #     return msg
+
 
     @staticmethod
     def resend_request(beginSeqNo, endSeqNo = '0'):

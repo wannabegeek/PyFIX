@@ -1,7 +1,9 @@
 from enum import Enum
 import datetime
+import os
 from select import select, error
 import errno
+import time
 
 class EventType(Enum):
     NONE = 0
@@ -79,18 +81,26 @@ class SelectEventLoop(EventLoop):
             self.writeSet.remove(event.fd)
 
     def run(self, timeout):
-        while True:
-            try:
-                readReady, writeReady, exceptReady = select(self.readSet, self.writeSet, [], timeout)
-                events = []
-                for r in readReady:
-                    events.append(_Event(r, EventType.READ))
-                for r in writeReady:
-                    events.append(_Event(r, EventType.WRITE))
-                return events
-            except error as why:
-                if why[0] != errno.EAGAIN and why[0] != errno.EINTR:
-                    break
+        if len(self.readSet) == 0 and len(self.writeSet) ==0:
+            time.sleep(timeout)
+            return []
+        else:
+            while True:
+                try:
+                    readReady, writeReady, exceptReady = select(self.readSet, self.writeSet, [], timeout)
+                    events = []
+                    for r in readReady:
+                        events.append(_Event(r, EventType.READ))
+                    for r in writeReady:
+                        events.append(_Event(r, EventType.WRITE))
+                    return events
+                except error as why:
+                    if os.name == 'posix':
+                        if why[0] != errno.EAGAIN and why[0] != errno.EINTR:
+                            break
+                    else:
+                        if why[0] == errno.WSAEADDRINUSE:
+                            break
 
 
 class EventManager(object):

@@ -2,6 +2,12 @@ from datetime import datetime
 import logging
 from pyfix.message import FIXMessage, FIXContext
 
+class EncodingError(Exception):
+    pass
+
+class DecodingError(Exception):
+    pass
+
 class RepeatingGroupContext(FIXContext):
     def __init__(self, tag, repeatingGroupTags, parent):
         self.tag = tag
@@ -18,17 +24,17 @@ class Codec(object):
     def current_datetime():
         return datetime.utcnow().strftime("%Y%m%d-%H:%M:%S.%f")[:-3]
 
-    def addTag(self, body, t, msg):
+    def _addTag(self, body, t, msg):
         if msg.isRepeatingGroup(t):
             count, groups = msg.getRepeatingGroup(t)
             body.append("%s=%s" % (t, count))
             for group in groups:
                 for tag in group.tags:
-                    self.addTag(body, tag, group)
+                    self._addTag(body, tag, group)
         else:
             body.append("%s=%s" % (t, msg[t]))
 
-    def pack(self, msg, session):
+    def encode(self, msg, session):
         # Create body
         body = []
 
@@ -36,15 +42,33 @@ class Codec(object):
 
         body.append("%s=%s" % (self.protocol.fixtags.SenderCompID, session.senderCompId))
         body.append("%s=%s" % (self.protocol.fixtags.TargetCompID, session.targetCompId))
+
+        seqNo = 0
         if msgType == self.protocol.msgtype.SEQUENCERESET:
-            msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
-            body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, msg[self.protocol.fixtags.MsgSeqNum]))
+            if self.protocol.fixtags.GapFillFlag in msg and msg[self.protocol.fixtags.GapFillFlag] == "Y":
+                # in this case the sequence number should already be on the message
+                try:
+                    seqNo = msg[self.protocol.fixtags.MsgSeqNum]
+                except KeyError:
+                    raise EncodingError("SequenceReset with GapFill='Y' must have the MsgSeqNum already populated")
+            else:
+                msg[self.protocol.fixtags.NewSeqNo] = session.allocateSndSeqNo()
+                seqNo = msg[self.protocol.fixtags.MsgSeqNum]
         else:
-            body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, session.allocateSndSeqNo()))
+            # if we have the PossDupFlag set, we need to send the message with the same seqNo
+            if self.protocol.fixtags.PossDupFlag in msg and msg[self.protocol.fixtags.PossDupFlag] == "Y":
+                try:
+                    seqNo = msg[self.protocol.fixtags.MsgSeqNum]
+                except KeyError:
+                    raise EncodingError("Failed to encode message with PossDupFlay=Y but no previous MsgSeqNum")
+            else:
+                seqNo = session.allocateSndSeqNo()
+
+        body.append("%s=%s" % (self.protocol.fixtags.MsgSeqNum, seqNo))
         body.append("%s=%s" % (self.protocol.fixtags.SendingTime, self.current_datetime()))
 
         for t in msg.tags:
-            self.addTag(body, t, msg)
+            self._addTag(body, t, msg)
 
         # Enable easy change when debugging
         SEP = self.SOH
@@ -67,7 +91,7 @@ class Codec(object):
 
         return fixmsg + SEP
 
-    def parse(self, rawmsg):
+    def decode(self, rawmsg):
         #msg = rawmsg.rstrip(os.linesep).split(SOH)
         try:
             rawmsg = rawmsg.decode('utf-8')
@@ -119,15 +143,12 @@ class Codec(object):
 
                     if tag == self.protocol.fixtags.CheckSum:
                         cksum = ((sum([ord(i) for i in list(self.SOH.join(msg[:-1]))]) + 1) % 256)
-                        if cksum == int(value):
-                            logging.debug("\tCheckSum: %s (OK)" % (int(value)))
-                        else:
+                        if cksum != int(value):
                             logging.warning("\tCheckSum: %s (INVALID) expecting %s" % (int(value), cksum))
                     elif tag == self.protocol.fixtags.MsgType:
                         try:
                             msgType =  self.protocol.msgtype.msgTypeToName(value)
                             decodedMsg.setMsgType(value)
-                            logging.debug("MsgType: %s" % msgType)
                         except KeyError:
                             logging.error('*** MsgType "%s" not supported ***')
 
@@ -161,7 +182,6 @@ class Codec(object):
                         # this isn't a repeating group field, so just add it normally
                         decodedMsg.setField(tag, value)
 
-                logging.debug("\t%s" % decodedMsg)
                 return (decodedMsg, remainingMsgFragment)
         except UnicodeDecodeError as why:
             logging.error("Failed to parse message %s" % (why, ))
