@@ -20,7 +20,7 @@ class JournalerTests(unittest.TestCase):
         rptgrp1.setField("613", "ccc")
 
         msg.addRepeatingGroup("444", rptgrp1, 0)
-        session = FIXSession("S1", "T1")
+        session = FIXSession(1, "S1", "T1")
         for i in range(0, 5):
             msg.setField("34", str(i))
             journal.persistMsg(msg, session, MessageDirection.OUTBOUND)
@@ -41,7 +41,7 @@ class JournalerTests(unittest.TestCase):
         rptgrp1.setField("613", "ccc")
 
         msg.addRepeatingGroup("444", rptgrp1, 0)
-        session = FIXSession("S1", "T1")
+        session = FIXSession(1, "S1", "T1")
         for i in range(0, 5):
             msg.setField("34", str(i))
             journal.persistMsg(msg, session, MessageDirection.OUTBOUND)
