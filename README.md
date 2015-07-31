@@ -1,4 +1,4 @@
-# PyFIX
+# PyFIX [![Build Status](https://travis-ci.org/wannabegeek/PyFIX.svg?branch=master)](https://travis-ci.org/wannabegeek/PyFIX)
 Open Source implementation of a FIX (Financial Information eXchange) Engine implemented in Python
 
 See here [http://fixprotocol.org/] for more information on what FIX is.
